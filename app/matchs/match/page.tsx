@@ -8,6 +8,7 @@ import { getMatch } from "@/lib/matches";
 import { getMatchPredictions } from "@/lib/predictions";
 import { doc, getDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
+import { getDisplayName } from "@/lib/user";
 import type { Match, Prediction, User } from "@/lib/types";
 import Nav from "@/components/Nav";
 
@@ -54,7 +55,7 @@ function MatchPronosticsContent() {
           const u = userSnap.data() as User | undefined;
           return {
             ...p,
-            userName: u?.name ?? "Inconnu",
+            userName: getDisplayName(u),
             userAvatar: u?.avatar,
           };
         })

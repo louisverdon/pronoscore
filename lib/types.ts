@@ -25,9 +25,11 @@ export interface Match {
 export interface User {
   uid: string;
   name: string;
+  displayName?: string; // Nom choisi par l'utilisateur (première connexion)
   email: string;
   avatar?: string;
   createdAt: string;
+  hasCompletedOnboarding?: boolean; // false = doit saisir son nom
 }
 
 export interface Prediction {

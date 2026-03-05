@@ -1,5 +1,6 @@
 import { collection, getDocs, doc, getDoc } from "firebase/firestore";
 import { db } from "./firebase";
+import { getDisplayName } from "./user";
 import type { RankingEntry, User } from "./types";
 
 export async function getRanking(): Promise<RankingEntry[]> {
@@ -31,7 +32,7 @@ export async function getRanking(): Promise<RankingEntry[]> {
     const user = userSnap.data() as User | undefined;
     entries.push({
       userId,
-      userName: user?.name ?? "Inconnu",
+      userName: getDisplayName(user),
       userAvatar: user?.avatar,
       totalPoints,
       exactScores,

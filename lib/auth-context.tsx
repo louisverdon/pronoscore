@@ -8,7 +8,7 @@ import {
   signOut as firebaseSignOut,
   onAuthStateChanged,
 } from "firebase/auth";
-import { doc, getDoc, setDoc } from "firebase/firestore";
+import { doc, getDoc, setDoc, updateDoc } from "firebase/firestore";
 import { auth, db } from "./firebase";
 import type { User } from "./types";
 
@@ -18,6 +18,7 @@ interface AuthContextType {
   loading: boolean;
   signInWithGoogle: () => Promise<void>;
   signOut: () => Promise<void>;
+  updateDisplayName: (displayName: string) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -42,6 +43,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             email: fbUser.email || "",
             avatar: fbUser.photoURL || undefined,
             createdAt: new Date().toISOString(),
+            hasCompletedOnboarding: false,
           };
           await setDoc(doc(db, "users", fbUser.uid), newUser);
           setUser(newUser);
@@ -66,9 +68,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setFirebaseUser(null);
   };
 
+  const updateDisplayName = async (displayName: string) => {
+    if (!firebaseUser) return;
+    const userRef = doc(db, "users", firebaseUser.uid);
+    await updateDoc(userRef, {
+      displayName: displayName.trim(),
+      hasCompletedOnboarding: true,
+    });
+    setUser((prev) =>
+      prev
+        ? { ...prev, displayName: displayName.trim(), hasCompletedOnboarding: true }
+        : null
+    );
+  };
+
   return (
     <AuthContext.Provider
-      value={{ user, firebaseUser, loading, signInWithGoogle, signOut }}
+      value={{
+        user,
+        firebaseUser,
+        loading,
+        signInWithGoogle,
+        signOut,
+        updateDisplayName,
+      }}
     >
       {children}
     </AuthContext.Provider>
