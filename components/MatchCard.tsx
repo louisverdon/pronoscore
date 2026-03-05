@@ -86,43 +86,45 @@ export default function MatchCard({
           </span>
         )}
       </div>
-      <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-4">
-        <div className="flex items-center justify-start gap-2 font-medium">
+      <div className="relative flex items-center gap-4">
+        <div className="flex min-w-0 flex-1 items-center justify-start gap-2 font-medium">
           {match.homeTeam.crest && (
             <img
               src={match.homeTeam.crest}
               alt=""
-              className="h-6 w-6 object-contain"
+              className="h-6 w-6 shrink-0 object-contain"
             />
           )}
-          <span>{match.homeTeam.name}</span>
+          <span className="truncate">{match.homeTeam.name}</span>
         </div>
-        <div className="flex shrink-0 items-center justify-center gap-2">
+        <div className="flex shrink-0 basis-44 items-center justify-center">
           {isFinished ? (
             <span className="text-lg font-bold">
               {match.homeScore ?? "-"} - {match.awayScore ?? "-"}
             </span>
           ) : canEdit && loaded ? (
-            <div className="flex items-center gap-2">
-              <input
-                type="number"
-                min="0"
-                max="20"
-                value={homeScore}
-                onChange={(e) => setHomeScore(e.target.value)}
-                className="w-14 rounded border border-zinc-300 px-2 py-1 text-center text-lg"
-              />
-              <span className="text-zinc-400">-</span>
-              <input
-                type="number"
-                min="0"
-                max="20"
-                value={awayScore}
-                onChange={(e) => setAwayScore(e.target.value)}
-                className="w-14 rounded border border-zinc-300 px-2 py-1 text-center text-lg"
-              />
+            <div className="flex flex-col items-center gap-0.5">
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  min="0"
+                  max="20"
+                  value={homeScore}
+                  onChange={(e) => setHomeScore(e.target.value)}
+                  className="w-14 rounded border border-zinc-300 px-2 py-1 text-center text-lg"
+                />
+                <span className="text-zinc-400">-</span>
+                <input
+                  type="number"
+                  min="0"
+                  max="20"
+                  value={awayScore}
+                  onChange={(e) => setAwayScore(e.target.value)}
+                  className="w-14 rounded border border-zinc-300 px-2 py-1 text-center text-lg"
+                />
+              </div>
               <span
-                className={`text-xs text-zinc-400 ${
+                className={`min-h-[1rem] text-xs text-zinc-400 ${
                   saving ? "visible" : "invisible"
                 }`}
               >
@@ -137,13 +139,13 @@ export default function MatchCard({
             <span className="text-zinc-400">—</span>
           )}
         </div>
-        <div className="flex items-center justify-end gap-2 font-medium">
-          <span>{match.awayTeam.name}</span>
+        <div className="flex min-w-0 flex-1 items-center justify-end gap-2 font-medium">
+          <span className="truncate">{match.awayTeam.name}</span>
           {match.awayTeam.crest && (
             <img
               src={match.awayTeam.crest}
               alt=""
-              className="h-6 w-6 object-contain"
+              className="h-6 w-6 shrink-0 object-contain"
             />
           )}
         </div>
