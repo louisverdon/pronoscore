@@ -23,6 +23,10 @@ export default function ClassementPage() {
         setRanking(r);
         setLoadingRanking(false);
       });
+      const interval = setInterval(() => {
+        getRanking().then(setRanking);
+      }, 60_000);
+      return () => clearInterval(interval);
     }
   }, [user, loading, router]);
 
@@ -98,6 +102,11 @@ export default function ClassementPage() {
                 </div>
                 <span className="text-2xl font-bold text-blue-600">
                   {r.totalPoints}
+                  {r.potentialPoints > 0 && (
+                    <span className="ml-1 text-orange-500">
+                      +{r.potentialPoints}
+                    </span>
+                  )}
                 </span>
               </div>
             ))}

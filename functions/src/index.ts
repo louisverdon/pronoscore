@@ -139,7 +139,7 @@ export const syncMatches = functions.pubsub
   });
 
 /**
- * Calculate points for finished matches, runs every 30 minutes.
+ * Calculate points for finished matches.
  */
 function computePoints(
   predHome: number,
@@ -157,6 +157,43 @@ function computePoints(
     realHome > realAway ? "HOME" : realHome < realAway ? "AWAY" : "DRAW";
   if (predWinner === realWinner) return 1;
   return 0;
+}
+
+/** Traite un match terminé : met à jour les pronostics et le currentScore des utilisateurs. */
+async function processFinishedMatch(
+  db: admin.firestore.Firestore,
+  matchId: string,
+  matchData: admin.firestore.DocumentData
+): Promise<number> {
+  const realHome = Number(matchData.homeScore ?? 0);
+  const realAway = Number(matchData.awayScore ?? 0);
+
+  const preds = await db
+    .collection("predictions")
+    .where("matchId", "==", matchId)
+    .get();
+
+  const batch = db.batch();
+  let updated = 0;
+  for (const predDoc of preds.docs) {
+    const data = predDoc.data();
+    if (data.points !== undefined && data.points !== null) continue;
+    const points = computePoints(
+      data.homeScore ?? 0,
+      data.awayScore ?? 0,
+      realHome,
+      realAway
+    );
+    batch.update(predDoc.ref, { points });
+    const userId = data.userId;
+    if (userId) {
+      const userRef = db.collection("users").doc(userId);
+      batch.set(userRef, { currentScore: admin.firestore.FieldValue.increment(points) }, { merge: true });
+    }
+    updated++;
+  }
+  if (updated > 0) await batch.commit();
+  return updated;
 }
 
 // --- Commandes de test (matchs fictifs) ---
@@ -268,29 +305,7 @@ export const calculateScoresManual = functions.https.onRequest(async (req, res) 
 
     let totalUpdated = 0;
     for (const matchDoc of finished.docs) {
-      const matchId = matchDoc.id;
-      const matchData = matchDoc.data();
-      const realHome = Number(matchData.homeScore ?? 0);
-      const realAway = Number(matchData.awayScore ?? 0);
-
-      const preds = await db
-        .collection("predictions")
-        .where("matchId", "==", matchId)
-        .get();
-
-      const batch = db.batch();
-      for (const predDoc of preds.docs) {
-        const data = predDoc.data();
-        const points = computePoints(
-          data.homeScore ?? 0,
-          data.awayScore ?? 0,
-          realHome,
-          realAway
-        );
-        batch.update(predDoc.ref, { points });
-        totalUpdated++;
-      }
-      await batch.commit();
+      totalUpdated += await processFinishedMatch(db, matchDoc.id, matchDoc.data());
     }
     res.status(200).json({ matchesProcessed: finished.size, predictionsUpdated: totalUpdated });
   } catch (e) {
@@ -309,28 +324,22 @@ export const calculateScores = functions.pubsub
       .get();
 
     for (const matchDoc of finished.docs) {
-      const matchId = matchDoc.id;
-      const matchData = matchDoc.data();
-      const realHome = Number(matchData.homeScore ?? 0);
-      const realAway = Number(matchData.awayScore ?? 0);
-
-      const preds = await db
-        .collection("predictions")
-        .where("matchId", "==", matchId)
-        .get();
-
-      const batch = db.batch();
-      for (const predDoc of preds.docs) {
-        const data = predDoc.data();
-        const points = computePoints(
-          data.homeScore ?? 0,
-          data.awayScore ?? 0,
-          realHome,
-          realAway
-        );
-        batch.update(predDoc.ref, { points });
-      }
-      await batch.commit();
+      await processFinishedMatch(db, matchDoc.id, matchDoc.data());
     }
+    return null;
+  });
+
+/**
+ * Déclenche le calcul des scores dès qu'un match passe à FINISHED.
+ */
+export const onMatchFinished = functions.firestore
+  .document("matches/{matchId}")
+  .onUpdate(async (change, context) => {
+    const after = change.after.data();
+    if (after.status !== "FINISHED") return null;
+
+    const matchId = context.params.matchId as string;
+    const db = admin.firestore();
+    await processFinishedMatch(db, matchId, after);
     return null;
   });

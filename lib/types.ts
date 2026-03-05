@@ -30,6 +30,7 @@ export interface User {
   avatar?: string;
   createdAt: string;
   hasCompletedOnboarding?: boolean; // false = doit saisir son nom
+  currentScore?: number; // Score actuel (0 par défaut), mis à jour quand un match se termine
 }
 
 export interface Prediction {
@@ -51,7 +52,8 @@ export interface RankingEntry {
   userId: string;
   userName: string;
   userAvatar?: string;
-  totalPoints: number;
+  totalPoints: number; // currentScore (score actuel fixe)
+  potentialPoints: number; // points si les matchs en cours s'arrêtaient maintenant
   exactScores: number;
   rank: number;
 }

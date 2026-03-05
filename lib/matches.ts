@@ -56,6 +56,19 @@ export async function getRecentMatches(): Promise<Match[]> {
     .reverse();
 }
 
+/** Matchs en cours (LIVE ou IN_PLAY) avec un score actuel */
+export async function getOngoingMatches(): Promise<Match[]> {
+  const matches = await getAllMatches();
+  return matches.filter(
+    (m) =>
+      (m.status === "LIVE" || m.status === "IN_PLAY") &&
+      m.homeScore !== undefined &&
+      m.homeScore !== null &&
+      m.awayScore !== undefined &&
+      m.awayScore !== null
+  );
+}
+
 export async function getMatch(matchId: string): Promise<Match | null> {
   const matchRef = doc(db, MATCHES_COLLECTION, matchId);
   const snap = await getDoc(matchRef);

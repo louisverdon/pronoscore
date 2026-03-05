@@ -44,6 +44,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             avatar: fbUser.photoURL || undefined,
             createdAt: new Date().toISOString(),
             hasCompletedOnboarding: false,
+            currentScore: 0,
           };
           await setDoc(doc(db, "users", fbUser.uid), newUser);
           setUser(newUser);

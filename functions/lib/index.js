@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.calculateScores = exports.calculateScoresManual = exports.updateTestMatch = exports.addTestMatches = exports.syncMatches = exports.syncMatchesManual = void 0;
+exports.onMatchFinished = exports.calculateScores = exports.calculateScoresManual = exports.updateTestMatch = exports.addTestMatches = exports.syncMatches = exports.syncMatchesManual = void 0;
 const functions = require("firebase-functions");
 const admin = require("firebase-admin");
 admin.initializeApp();
@@ -108,7 +108,7 @@ exports.syncMatches = functions.pubsub
     return null;
 });
 /**
- * Calculate points for finished matches, runs every 30 minutes.
+ * Calculate points for finished matches.
  */
 function computePoints(predHome, predAway, realHome, realAway) {
     if (predHome === realHome && predAway === realAway)
@@ -122,6 +122,33 @@ function computePoints(predHome, predAway, realHome, realAway) {
     if (predWinner === realWinner)
         return 1;
     return 0;
+}
+/** Traite un match terminé : met à jour les pronostics et le currentScore des utilisateurs. */
+async function processFinishedMatch(db, matchId, matchData) {
+    const realHome = Number(matchData.homeScore ?? 0);
+    const realAway = Number(matchData.awayScore ?? 0);
+    const preds = await db
+        .collection("predictions")
+        .where("matchId", "==", matchId)
+        .get();
+    const batch = db.batch();
+    let updated = 0;
+    for (const predDoc of preds.docs) {
+        const data = predDoc.data();
+        if (data.points !== undefined && data.points !== null)
+            continue;
+        const points = computePoints(data.homeScore ?? 0, data.awayScore ?? 0, realHome, realAway);
+        batch.update(predDoc.ref, { points });
+        const userId = data.userId;
+        if (userId) {
+            const userRef = db.collection("users").doc(userId);
+            batch.set(userRef, { currentScore: admin.firestore.FieldValue.increment(points) }, { merge: true });
+        }
+        updated++;
+    }
+    if (updated > 0)
+        await batch.commit();
+    return updated;
 }
 // --- Commandes de test (matchs fictifs) ---
 const TEST_MATCHES = [
@@ -229,22 +256,7 @@ exports.calculateScoresManual = functions.https.onRequest(async (req, res) => {
             .get();
         let totalUpdated = 0;
         for (const matchDoc of finished.docs) {
-            const matchId = matchDoc.id;
-            const matchData = matchDoc.data();
-            const realHome = Number(matchData.homeScore ?? 0);
-            const realAway = Number(matchData.awayScore ?? 0);
-            const preds = await db
-                .collection("predictions")
-                .where("matchId", "==", matchId)
-                .get();
-            const batch = db.batch();
-            for (const predDoc of preds.docs) {
-                const data = predDoc.data();
-                const points = computePoints(data.homeScore ?? 0, data.awayScore ?? 0, realHome, realAway);
-                batch.update(predDoc.ref, { points });
-                totalUpdated++;
-            }
-            await batch.commit();
+            totalUpdated += await processFinishedMatch(db, matchDoc.id, matchDoc.data());
         }
         res.status(200).json({ matchesProcessed: finished.size, predictionsUpdated: totalUpdated });
     }
@@ -262,22 +274,22 @@ exports.calculateScores = functions.pubsub
         .where("status", "==", "FINISHED")
         .get();
     for (const matchDoc of finished.docs) {
-        const matchId = matchDoc.id;
-        const matchData = matchDoc.data();
-        const realHome = Number(matchData.homeScore ?? 0);
-        const realAway = Number(matchData.awayScore ?? 0);
-        const preds = await db
-            .collection("predictions")
-            .where("matchId", "==", matchId)
-            .get();
-        const batch = db.batch();
-        for (const predDoc of preds.docs) {
-            const data = predDoc.data();
-            const points = computePoints(data.homeScore ?? 0, data.awayScore ?? 0, realHome, realAway);
-            batch.update(predDoc.ref, { points });
-        }
-        await batch.commit();
+        await processFinishedMatch(db, matchDoc.id, matchDoc.data());
     }
+    return null;
+});
+/**
+ * Déclenche le calcul des scores dès qu'un match passe à FINISHED.
+ */
+exports.onMatchFinished = functions.firestore
+    .document("matches/{matchId}")
+    .onUpdate(async (change, context) => {
+    const after = change.after.data();
+    if (after.status !== "FINISHED")
+        return null;
+    const matchId = context.params.matchId;
+    const db = admin.firestore();
+    await processFinishedMatch(db, matchId, after);
     return null;
 });
 //# sourceMappingURL=index.js.map
