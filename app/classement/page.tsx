@@ -1,0 +1,109 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useAuth } from "@/lib/auth-context";
+import { getRanking } from "@/lib/ranking";
+import type { RankingEntry } from "@/lib/types";
+import Nav from "@/components/Nav";
+
+export default function ClassementPage() {
+  const { user, loading } = useAuth();
+  const router = useRouter();
+  const [ranking, setRanking] = useState<RankingEntry[]>([]);
+  const [loadingRanking, setLoadingRanking] = useState(true);
+
+  useEffect(() => {
+    if (!loading && !user) {
+      router.replace("/login");
+      return;
+    }
+    if (user) {
+      getRanking().then((r) => {
+        setRanking(r);
+        setLoadingRanking(false);
+      });
+    }
+  }, [user, loading, router]);
+
+  if (loading || !user) {
+    return (
+      <div className="flex min-h-screen items-center justify-center">
+        <div className="text-zinc-500">Chargement...</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-zinc-50">
+      <Nav />
+      <main className="mx-auto max-w-2xl px-4 py-8">
+        <h1 className="mb-6 text-2xl font-bold text-zinc-900">Classement</h1>
+        {loadingRanking ? (
+          <div className="text-zinc-500">Chargement...</div>
+        ) : ranking.length === 0 ? (
+          <p className="text-zinc-600">
+            Aucun pronostic enregistré. Le classement apparaîtra une fois les
+            matchs terminés et les scores calculés.
+          </p>
+        ) : (
+          <div className="space-y-2">
+            {ranking.map((r) => (
+              <div
+                key={r.userId}
+                className={`flex items-center justify-between rounded-xl border p-4 ${
+                  r.userId === user?.uid
+                    ? "border-blue-300 bg-blue-50"
+                    : "border-zinc-200 bg-white"
+                }`}
+              >
+                <div className="flex items-center gap-4">
+                  <span
+                    className={`flex h-10 w-10 items-center justify-center rounded-full text-lg font-bold ${
+                      r.rank === 1
+                        ? "bg-amber-200 text-amber-800"
+                        : r.rank === 2
+                          ? "bg-zinc-200 text-zinc-700"
+                          : r.rank === 3
+                            ? "bg-amber-100 text-amber-900"
+                            : "bg-zinc-100 text-zinc-600"
+                    }`}
+                  >
+                    {r.rank}
+                  </span>
+                  {r.userAvatar ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={r.userAvatar}
+                      alt=""
+                      className="h-10 w-10 rounded-full"
+                    />
+                  ) : (
+                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-zinc-200 font-medium">
+                      {r.userName.charAt(0)}
+                    </div>
+                  )}
+                  <div>
+                    <span className="font-medium">
+                      {r.userName}
+                      {r.userId === user?.uid && (
+                        <span className="ml-2 text-sm text-blue-600">(vous)</span>
+                      )}
+                    </span>
+                    <p className="text-xs text-zinc-500">
+                      {r.exactScores} score{r.exactScores > 1 ? "s" : ""} exact
+                      {r.exactScores > 1 ? "s" : ""}
+                    </p>
+                  </div>
+                </div>
+                <span className="text-2xl font-bold text-blue-600">
+                  {r.totalPoints}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </main>
+    </div>
+  );
+}
