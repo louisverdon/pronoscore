@@ -1,0 +1,16 @@
+[debug] [2026-03-05T18:21:45.503Z] ----------------------------------------------------------------------
+[debug] [2026-03-05T18:21:45.505Z] Command:       C:\Program Files\nodejs\node.exe C:\Users\louis\AppData\Roaming\npm\node_modules\firebase-tools\lib\bin\firebase.js deploy
+[debug] [2026-03-05T18:21:45.506Z] CLI Version:   15.8.0
+[debug] [2026-03-05T18:21:45.506Z] Platform:      win32
+[debug] [2026-03-05T18:21:45.506Z] Node Version:  v22.14.0
+[debug] [2026-03-05T18:21:45.506Z] Time:          Thu Mar 05 2026 19:21:45 GMT+0100 (heure normale d’Europe centrale)
+[debug] [2026-03-05T18:21:45.506Z] ----------------------------------------------------------------------
+[debug] 
+[debug] [2026-03-05T18:21:47.030Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] [2026-03-05T18:21:47.031Z] > authorizing via signed-in user (redeimos59@gmail.com)
+[debug] [2026-03-05T18:21:47.031Z] [iam] checking project pronoscore-e143b for permissions ["cloudfunctions.functions.create","cloudfunctions.functions.delete","cloudfunctions.functions.get","cloudfunctions.functions.list","cloudfunctions.functions.update","cloudfunctions.operations.get","datastore.indexes.create","datastore.indexes.delete","datastore.indexes.list","datastore.indexes.update","firebase.projects.get","firebasehosting.sites.update"]
+[debug] [2026-03-05T18:21:47.032Z] Checked if tokens are valid: true, expires at: 1772735990663
+[debug] [2026-03-05T18:21:47.032Z] Checked if tokens are valid: true, expires at: 1772735990663
+[debug] [2026-03-05T18:21:47.033Z] >>> [apiv2][query] POST https://cloudresourcemanager.googleapis.com/v1/projects/pronoscore-e143b:testIamPermissions [none]
+[debug] [2026-03-05T18:21:47.033Z] >>> [apiv2][(partial)header] POST https://cloudresourcemanager.googleapis.com/v1/projects/pronoscore-e143b:testIamPermissions  x-goog-user-project=pronoscore-e143b
+[debug] [2026-03-05T18:21:47.033Z] >>> [apiv2][body] POST https://cloudresourcemanager.googleapis.com/v1/projects/pronoscore-e143b:testIamPermissions {"permissions":["cloudfunctions.functions.create","cloudfunctions.functions.delete","cloudfunctions.functions.get","cloudfunctions.functions.list","cloudfunctions.functions.update","cloudfunctions.operations.get","datastore.indexes.create","datastore.indexes.delete","datastore.indexes.list","datastore.indexes.update","firebase.projects.get","firebasehosting.sites.update"]}

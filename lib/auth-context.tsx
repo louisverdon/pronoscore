@@ -60,7 +60,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signInWithGoogle = async () => {
     const provider = new GoogleAuthProvider();
-    await signInWithPopup(auth, provider);
+    try {
+      await signInWithPopup(auth, provider);
+    } catch (err: unknown) {
+      const msg =
+        err instanceof Error ? err.message : "Erreur de connexion";
+      console.error("signInWithGoogle:", err);
+      alert(`Connexion échouée : ${msg}`);
+    }
   };
 
   const signOut = async () => {
