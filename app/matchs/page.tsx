@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
-import { getUpcomingMatches, getRecentMatches } from "@/lib/matches";
+import { getUpcomingMatches } from "@/lib/matches";
 import MatchCard from "@/components/MatchCard";
 import type { Match } from "@/lib/types";
 import Nav from "@/components/Nav";
@@ -12,7 +12,6 @@ export default function MatchsPage() {
   const { user, loading } = useAuth();
   const router = useRouter();
   const [upcoming, setUpcoming] = useState<Match[]>([]);
-  const [recent, setRecent] = useState<Match[]>([]);
   const [loadingMatches, setLoadingMatches] = useState(true);
 
   useEffect(() => {
@@ -21,13 +20,10 @@ export default function MatchsPage() {
       return;
     }
     if (user) {
-      Promise.all([getUpcomingMatches(), getRecentMatches()]).then(
-        ([u, r]) => {
-          setUpcoming(u);
-          setRecent(r);
-          setLoadingMatches(false);
-        }
-      );
+      getUpcomingMatches().then((u) => {
+        setUpcoming(u);
+        setLoadingMatches(false);
+      });
     }
   }, [user, loading, router]);
 
@@ -58,19 +54,6 @@ export default function MatchsPage() {
               <MatchCard key={m.id} match={m} showPronosticsLink={false} />
             ))}
           </div>
-        )}
-
-        {!loadingMatches && recent.length > 0 && (
-          <>
-            <h2 className="mt-12 mb-4 text-xl font-bold text-zinc-900">
-              Matchs récents
-            </h2>
-            <div className="space-y-4">
-              {recent.slice(0, 10).map((m) => (
-                <MatchCard key={m.id} match={m} />
-              ))}
-            </div>
-          </>
         )}
       </main>
     </div>

@@ -18,7 +18,7 @@ export default function Nav() {
               href="/matchs"
               className="text-sm text-zinc-600 hover:text-zinc-900"
             >
-              Matchs
+              Prochains matchs
             </Link>
             <Link
               href="/pronostics"

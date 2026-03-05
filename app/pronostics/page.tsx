@@ -109,15 +109,31 @@ export default function MesPronosticsPage() {
                       })()}
                     </div>
                     <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 font-medium">
-                      <span className="min-w-0 truncate text-right">
-                        {p.match.homeTeam.name}
-                      </span>
-                      <span className="text-center text-lg tabular-nums">
+                      <div className="flex min-w-0 flex-1 items-center justify-start gap-2">
+                        {p.match.homeTeam.crest && (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={p.match.homeTeam.crest}
+                            alt=""
+                            className="h-6 w-6 shrink-0 object-contain"
+                          />
+                        )}
+                        <span className="truncate">{p.match.homeTeam.name}</span>
+                      </div>
+                      <span className="shrink-0 text-center text-lg tabular-nums">
                         {p.homeScore} - {p.awayScore}
                       </span>
-                      <span className="min-w-0 truncate">
-                        {p.match.awayTeam.name}
-                      </span>
+                      <div className="flex min-w-0 flex-1 items-center justify-end gap-2">
+                        <span className="truncate">{p.match.awayTeam.name}</span>
+                        {p.match.awayTeam.crest && (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={p.match.awayTeam.crest}
+                            alt=""
+                            className="h-6 w-6 shrink-0 object-contain"
+                          />
+                        )}
+                      </div>
                     </div>
                     {p.match.status === "FINISHED" && (
                       <div className="mt-2 text-sm text-zinc-600">
