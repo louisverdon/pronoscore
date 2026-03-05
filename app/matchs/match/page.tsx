@@ -91,14 +91,32 @@ function MatchPronosticsContent() {
         ) : (
           <>
             <div className="mb-8 rounded-xl border border-zinc-200 bg-white p-6">
-              <div className="flex items-center justify-between text-2xl font-bold">
-                <span>{match.homeTeam.name}</span>
-                <span>
+              <div className="flex items-center justify-between gap-4 text-2xl font-bold">
+                <div className="flex flex-1 items-center justify-start gap-3">
+                  {match.homeTeam.crest && (
+                    <img
+                      src={match.homeTeam.crest}
+                      alt=""
+                      className="h-10 w-10 object-contain"
+                    />
+                  )}
+                  <span>{match.homeTeam.name}</span>
+                </div>
+                <span className="shrink-0">
                   {match.status === "FINISHED"
                     ? `${match.homeScore ?? "-"} - ${match.awayScore ?? "-"}`
                     : "vs"}
                 </span>
-                <span>{match.awayTeam.name}</span>
+                <div className="flex flex-1 items-center justify-end gap-3">
+                  <span>{match.awayTeam.name}</span>
+                  {match.awayTeam.crest && (
+                    <img
+                      src={match.awayTeam.crest}
+                      alt=""
+                      className="h-10 w-10 object-contain"
+                    />
+                  )}
+                </div>
               </div>
               <p className="mt-2 text-sm text-zinc-500">
                 {new Date(match.matchDate).toLocaleString("fr-FR")}

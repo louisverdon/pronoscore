@@ -1,11 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import type { Match } from "@/lib/types";
 import { getPrediction, savePrediction } from "@/lib/predictions";
 import { useAuth } from "@/lib/auth-context";
-import { useEffect } from "react";
 
 interface MatchCardProps {
   match: Match;
@@ -41,22 +40,32 @@ export default function MatchCard({
     });
   }, [user, match.id]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!user || !canEdit) return;
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (!user || !canEdit || !loaded) return;
     const h = parseInt(homeScore, 10);
     const a = parseInt(awayScore, 10);
     if (isNaN(h) || isNaN(a) || h < 0 || a < 0) return;
-    setSaving(true);
-    await savePrediction({
-      userId: user.uid,
-      matchId: match.id,
-      homeScore: h,
-      awayScore: a,
-      createdAt: new Date().toISOString(),
-    });
-    setSaving(false);
-  };
+
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(async () => {
+      debounceRef.current = null;
+      setSaving(true);
+      await savePrediction({
+        userId: user.uid,
+        matchId: match.id,
+        homeScore: h,
+        awayScore: a,
+        createdAt: new Date().toISOString(),
+      });
+      setSaving(false);
+    }, 500);
+
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, [user, canEdit, loaded, homeScore, awayScore, match.id]);
 
   const formatDate = (d: Date) =>
     d.toLocaleDateString("fr-FR", {
@@ -77,17 +86,24 @@ export default function MatchCard({
           </span>
         )}
       </div>
-      <div className="flex items-center gap-4">
-        <div className="flex-1 text-right font-medium">
-          {match.homeTeam.name}
+      <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-4">
+        <div className="flex items-center justify-start gap-2 font-medium">
+          {match.homeTeam.crest && (
+            <img
+              src={match.homeTeam.crest}
+              alt=""
+              className="h-6 w-6 object-contain"
+            />
+          )}
+          <span>{match.homeTeam.name}</span>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex shrink-0 items-center justify-center gap-2">
           {isFinished ? (
             <span className="text-lg font-bold">
               {match.homeScore ?? "-"} - {match.awayScore ?? "-"}
             </span>
           ) : canEdit && loaded ? (
-            <form onSubmit={handleSubmit} className="flex items-center gap-2">
+            <div className="flex items-center gap-2">
               <input
                 type="number"
                 min="0"
@@ -105,14 +121,14 @@ export default function MatchCard({
                 onChange={(e) => setAwayScore(e.target.value)}
                 className="w-14 rounded border border-zinc-300 px-2 py-1 text-center text-lg"
               />
-              <button
-                type="submit"
-                disabled={saving}
-                className="rounded bg-blue-600 px-3 py-1 text-sm text-white hover:bg-blue-700 disabled:opacity-50"
+              <span
+                className={`text-xs text-zinc-400 ${
+                  saving ? "visible" : "invisible"
+                }`}
               >
-                Valider
-              </button>
-            </form>
+                Enregistrement…
+              </span>
+            </div>
           ) : loaded ? (
             <span className="text-lg">
               {homeScore || "-"} - {awayScore || "-"}
@@ -121,7 +137,16 @@ export default function MatchCard({
             <span className="text-zinc-400">—</span>
           )}
         </div>
-        <div className="flex-1 font-medium">{match.awayTeam.name}</div>
+        <div className="flex items-center justify-end gap-2 font-medium">
+          <span>{match.awayTeam.name}</span>
+          {match.awayTeam.crest && (
+            <img
+              src={match.awayTeam.crest}
+              alt=""
+              className="h-6 w-6 object-contain"
+            />
+          )}
+        </div>
       </div>
       {showPronosticsLink && !canEdit && (
         <div className="mt-3">
