@@ -20,6 +20,7 @@ export interface Match {
   status: MatchStatus;
   homeScore?: number;
   awayScore?: number;
+  matchday?: number; // Journée de Ligue 1 (1-38)
 }
 
 export interface User {

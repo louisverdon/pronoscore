@@ -38,6 +38,7 @@ function toFirestoreMatch(m) {
         },
         matchDate: m.utcDate,
         status: m.status,
+        matchday: m.matchday ?? null,
         homeScore: m.score?.fullTime?.home ?? null,
         awayScore: m.score?.fullTime?.away ?? null,
     };

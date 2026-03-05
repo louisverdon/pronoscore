@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/lib/auth-context";
@@ -9,6 +9,12 @@ import { getMatch } from "@/lib/matches";
 import { computePoints } from "@/lib/points";
 import type { Prediction, Match } from "@/lib/types";
 import Nav from "@/components/Nav";
+
+/** Group key: matchday number, 0 = sans journée (matchs sans matchday). */
+function getMatchdayKey(m: Match | null | undefined): number {
+  if (m?.matchday != null && m.matchday > 0) return m.matchday;
+  return 0;
+}
 
 const isMatchInProgress = (m: Match) =>
   (m.status === "LIVE" || m.status === "IN_PLAY") &&
@@ -26,6 +32,37 @@ export default function MesPronosticsPage() {
   const router = useRouter();
   const [predictions, setPredictions] = useState<PredictionWithMatch[]>([]);
   const [loadingData, setLoadingData] = useState(true);
+  const [expandedMatchdays, setExpandedMatchdays] = useState<Set<number>>(new Set());
+
+  const groupsByMatchday = useMemo(() => {
+    const map = new Map<number, PredictionWithMatch[]>();
+    for (const p of predictions) {
+      const key = getMatchdayKey(p.match);
+      if (!map.has(key)) map.set(key, []);
+      map.get(key)!.push(p);
+    }
+    return Array.from(map.entries()).sort(([a], [b]) => b - a);
+  }, [predictions]);
+
+  // Par défaut, ouvrir uniquement la première section (journée la plus récente)
+  useEffect(() => {
+    if (groupsByMatchday.length > 0) {
+      const firstMatchday = groupsByMatchday[0][0];
+      setExpandedMatchdays((prev) => {
+        if (prev.size === 0) return new Set([firstMatchday]);
+        return prev;
+      });
+    }
+  }, [groupsByMatchday]);
+
+  const toggleMatchday = (matchday: number) => {
+    setExpandedMatchdays((prev) => {
+      const next = new Set(prev);
+      if (next.has(matchday)) next.delete(matchday);
+      else next.add(matchday);
+      return next;
+    });
+  };
 
   useEffect(() => {
     if (!loading && !user) {
@@ -42,6 +79,9 @@ export default function MesPronosticsPage() {
             })
           );
           withMatches.sort((a, b) => {
+            const mdA = getMatchdayKey(a.match);
+            const mdB = getMatchdayKey(b.match);
+            if (mdA !== mdB) return mdB - mdA; // matchday desc (récente d'abord)
             const da = a.match?.matchDate ?? "";
             const db = b.match?.matchDate ?? "";
             return da.localeCompare(db);
@@ -82,87 +122,118 @@ export default function MesPronosticsPage() {
             pour en enregistrer.
           </p>
         ) : (
-          <div className="space-y-4">
-            {predictions.map((p) => (
-              <div
-                key={p.id ?? `${p.userId}-${p.matchId}`}
-                className="rounded-xl border border-zinc-200 bg-white p-4"
-              >
-                {p.match ? (
-                  <>
-                    <div className="mb-2 flex items-center justify-between">
-                      <span className="text-sm text-zinc-500">
-                        {new Date(p.match.matchDate).toLocaleString("fr-FR")}
-                      </span>
-                      {p.match.status === "FINISHED" && p.points !== undefined && (
-                        <span className="rounded bg-green-100 px-2 py-1 text-sm font-medium text-green-800">
-                          +{p.points} pt{p.points > 1 ? "s" : ""}
-                        </span>
-                      )}
-                      {isMatchInProgress(p.match) && (() => {
-                        const pts = computePoints(p.homeScore, p.awayScore, p.match.homeScore ?? 0, p.match.awayScore ?? 0);
-                        return (
-                          <span className="rounded bg-orange-100 px-2 py-1 text-sm font-medium text-orange-700">
-                            +{pts} pt{pts > 1 ? "s" : ""}
-                          </span>
-                        );
-                      })()}
-                    </div>
-                    <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 font-medium">
-                      <div className="flex min-w-0 flex-1 items-center justify-start gap-2">
-                        {p.match.homeTeam.crest && (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img
-                            src={p.match.homeTeam.crest}
-                            alt=""
-                            className="h-6 w-6 shrink-0 object-contain"
-                          />
-                        )}
-                        <span className="truncate">{p.match.homeTeam.name}</span>
-                      </div>
-                      <span className="shrink-0 text-center text-lg tabular-nums">
-                        {p.homeScore} - {p.awayScore}
-                      </span>
-                      <div className="flex min-w-0 flex-1 items-center justify-end gap-2">
-                        <span className="truncate">{p.match.awayTeam.name}</span>
-                        {p.match.awayTeam.crest && (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img
-                            src={p.match.awayTeam.crest}
-                            alt=""
-                            className="h-6 w-6 shrink-0 object-contain"
-                          />
-                        )}
-                      </div>
-                    </div>
-                    {p.match.status === "FINISHED" && (
-                      <div className="mt-2 text-sm text-zinc-600">
-                        Résultat : {p.match.homeScore ?? "-"} -{" "}
-                        {p.match.awayScore ?? "-"}
-                      </div>
-                    )}
-                    {isMatchInProgress(p.match) && (
-                      <div className="mt-2 text-sm text-zinc-600">
-                        Score actuel : {p.match.homeScore} - {p.match.awayScore}
-                      </div>
-                    )}
-                    {p.match.status !== "SCHEDULED" &&
-                      p.match.status !== "TIMED" && (
-                        <Link
-                          href={`/matchs/match?id=${p.matchId}`}
-                          className="mt-2 inline-block text-sm text-blue-600 hover:underline"
+          <div className="space-y-6">
+            {groupsByMatchday.map(([matchday, preds]) => {
+              const isExpanded = expandedMatchdays.has(matchday);
+              const label =
+                matchday > 0
+                  ? `Journée ${matchday}`
+                  : "Autres";
+              return (
+                <section key={matchday} className="rounded-xl border border-zinc-200 bg-white">
+                  <button
+                    type="button"
+                    onClick={() => toggleMatchday(matchday)}
+                    className="flex w-full items-center justify-between px-4 py-3 text-left font-semibold text-zinc-900 hover:bg-zinc-50"
+                  >
+                    <span>{label}</span>
+                    <span className="text-zinc-500">
+                      {preds.length} pronostic{preds.length > 1 ? "s" : ""}
+                    </span>
+                    <span
+                      className={`transition-transform ${isExpanded ? "rotate-180" : ""}`}
+                      aria-hidden
+                    >
+                      ▼
+                    </span>
+                  </button>
+                  {isExpanded && (
+                    <div className="space-y-4 border-t border-zinc-200 p-4 pt-4">
+                      {preds.map((p) => (
+                        <div
+                          key={p.id ?? `${p.userId}-${p.matchId}`}
+                          className="rounded-lg border border-zinc-100 p-4"
                         >
-                          Voir les pronostics
-                        </Link>
-                      )}
-                  </>
-                ) : (
-                  <div className="text-zinc-500">
-                    Match {p.matchId} — {p.homeScore} - {p.awayScore}
-                  </div>
-                )}
-              </div>
-            ))}
+                          {p.match ? (
+                            <>
+                              <div className="mb-2 flex items-center justify-between">
+                                <span className="text-sm text-zinc-500">
+                                  {new Date(p.match.matchDate).toLocaleString("fr-FR")}
+                                </span>
+                                {p.match.status === "FINISHED" && p.points !== undefined && (
+                                  <span className="rounded bg-green-100 px-2 py-1 text-sm font-medium text-green-800">
+                                    +{p.points} pt{p.points > 1 ? "s" : ""}
+                                  </span>
+                                )}
+                                {isMatchInProgress(p.match) && (() => {
+                                  const pts = computePoints(p.homeScore, p.awayScore, p.match.homeScore ?? 0, p.match.awayScore ?? 0);
+                                  return (
+                                    <span className="rounded bg-orange-100 px-2 py-1 text-sm font-medium text-orange-700">
+                                      +{pts} pt{pts > 1 ? "s" : ""}
+                                    </span>
+                                  );
+                                })()}
+                              </div>
+                              <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 font-medium">
+                                <div className="flex min-w-0 flex-1 items-center justify-start gap-2">
+                                  {p.match.homeTeam.crest && (
+                                    // eslint-disable-next-line @next/next/no-img-element
+                                    <img
+                                      src={p.match.homeTeam.crest}
+                                      alt=""
+                                      className="h-6 w-6 shrink-0 object-contain"
+                                    />
+                                  )}
+                                  <span className="truncate">{p.match.homeTeam.name}</span>
+                                </div>
+                                <span className="shrink-0 text-center text-lg tabular-nums">
+                                  {p.homeScore} - {p.awayScore}
+                                </span>
+                                <div className="flex min-w-0 flex-1 items-center justify-end gap-2">
+                                  <span className="truncate">{p.match.awayTeam.name}</span>
+                                  {p.match.awayTeam.crest && (
+                                    // eslint-disable-next-line @next/next/no-img-element
+                                    <img
+                                      src={p.match.awayTeam.crest}
+                                      alt=""
+                                      className="h-6 w-6 shrink-0 object-contain"
+                                    />
+                                  )}
+                                </div>
+                              </div>
+                              {p.match.status === "FINISHED" && (
+                                <div className="mt-2 text-sm text-zinc-600">
+                                  Résultat : {p.match.homeScore ?? "-"} -{" "}
+                                  {p.match.awayScore ?? "-"}
+                                </div>
+                              )}
+                              {isMatchInProgress(p.match) && (
+                                <div className="mt-2 text-sm text-zinc-600">
+                                  Score actuel : {p.match.homeScore} - {p.match.awayScore}
+                                </div>
+                              )}
+                              {p.match.status !== "SCHEDULED" &&
+                                p.match.status !== "TIMED" && (
+                                  <Link
+                                    href={`/matchs/match?id=${p.matchId}`}
+                                    className="mt-2 inline-block text-sm text-blue-600 hover:underline"
+                                  >
+                                    Voir les pronostics
+                                  </Link>
+                                )}
+                            </>
+                          ) : (
+                            <div className="text-zinc-500">
+                              Match {p.matchId} — {p.homeScore} - {p.awayScore}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </section>
+              );
+            })}
           </div>
         )}
       </main>

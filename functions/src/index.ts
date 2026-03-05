@@ -19,6 +19,7 @@ interface FootballMatch {
   awayTeam: FootballTeam;
   utcDate: string;
   status: string;
+  matchday?: number;
   score?: {
     fullTime: { home: number | null; away: number | null };
   };
@@ -64,6 +65,7 @@ function toFirestoreMatch(m: FootballMatch) {
     },
     matchDate: m.utcDate,
     status: m.status,
+    matchday: m.matchday ?? null,
     homeScore: m.score?.fullTime?.home ?? null,
     awayScore: m.score?.fullTime?.away ?? null,
   };
