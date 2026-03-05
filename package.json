@@ -3,6 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "launch_test": "node launch_test",
+    "edit_test": "node edit_test",
     "dev": "next dev",
     "build": "next build",
     "start": "next start",

@@ -1,0 +1,51 @@
+#!/usr/bin/env node
+/**
+ * Modifie un match de test : score et/ou statut.
+ * Usage: ./edit_test <matchId> [homeScore] [awayScore] [status]
+ * Exemple: ./edit_test test-1 1 2 IN_PLAY
+ */
+
+const REGION = "us-central1";
+const PROJECT_ID = "pronoscore-e143b";
+
+const args = process.argv.slice(2);
+const matchId = args[0];
+const homeScore = args[1] !== undefined ? parseInt(args[1], 10) : undefined;
+const awayScore = args[2] !== undefined ? parseInt(args[2], 10) : undefined;
+const status = args[3];
+
+if (!matchId) {
+  console.error("Usage: ./edit_test <matchId> [homeScore] [awayScore] [status]");
+  console.error("Exemple: ./edit_test test-1 1 2 FINISHED");
+  process.exit(1);
+}
+
+const body = { matchId };
+if (homeScore !== undefined && !isNaN(homeScore)) body.homeScore = homeScore;
+if (awayScore !== undefined && !isNaN(awayScore)) body.awayScore = awayScore;
+if (status) body.status = status;
+
+const url =
+  process.env.FIREBASE_EMULATOR === "true"
+    ? `http://127.0.0.1:5001/${PROJECT_ID}/${REGION}/updateTestMatch`
+    : `https://${REGION}-${PROJECT_ID}.cloudfunctions.net/updateTestMatch`;
+
+fetch(url, {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify(body),
+})
+  .then((res) => res.text())
+  .then((text) => {
+    try {
+      const data = JSON.parse(text);
+      console.log("updateTestMatch:", data);
+    } catch {
+      console.log(text);
+    }
+    process.exit(0);
+  })
+  .catch((err) => {
+    console.error("Erreur:", err.message);
+    process.exit(1);
+  });

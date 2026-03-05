@@ -1,0 +1,24 @@
+#!/usr/bin/env node
+/**
+ * Crée les 5 matchs de test en appelant addTestMatches.
+ * Usage: ./launch_test ou node launch_test
+ */
+
+const REGION = "us-central1";
+const PROJECT_ID = "pronoscore-e143b";
+
+const url =
+  process.env.FIREBASE_EMULATOR === "true"
+    ? `http://127.0.0.1:5001/${PROJECT_ID}/${REGION}/addTestMatches`
+    : `https://${REGION}-${PROJECT_ID}.cloudfunctions.net/addTestMatches`;
+
+fetch(url, { method: "POST" })
+  .then((res) => res.text())
+  .then((body) => {
+    console.log("addTestMatches:", body);
+    process.exit(0);
+  })
+  .catch((err) => {
+    console.error("Erreur:", err.message);
+    process.exit(1);
+  });

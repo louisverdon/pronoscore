@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.calculateScores = exports.syncMatches = exports.syncMatchesManual = void 0;
+exports.calculateScores = exports.calculateScoresManual = exports.updateTestMatch = exports.addTestMatches = exports.syncMatches = exports.syncMatchesManual = void 0;
 const functions = require("firebase-functions");
 const admin = require("firebase-admin");
 admin.initializeApp();
@@ -123,6 +123,136 @@ function computePoints(predHome, predAway, realHome, realAway) {
         return 1;
     return 0;
 }
+// --- Commandes de test (matchs fictifs) ---
+const TEST_MATCHES = [
+    { home: "Equipe 1", away: "Equipe 2" },
+    { home: "Equipe 3", away: "Equipe 4" },
+    { home: "Equipe 5", away: "Equipe 6" },
+    { home: "Equipe 7", away: "Equipe 8" },
+    { home: "Equipe 9", away: "Equipe 10" },
+];
+/**
+ * HTTP endpoint pour ajouter 5 matchs de test.
+ * POST (aucun body requis)
+ */
+exports.addTestMatches = functions.https.onRequest(async (req, res) => {
+    if (req.method !== "POST") {
+        res.status(405).send("Method not allowed");
+        return;
+    }
+    try {
+        const db = admin.firestore();
+        const batch = db.batch();
+        const now = new Date();
+        for (let i = 0; i < TEST_MATCHES.length; i++) {
+            const m = TEST_MATCHES[i];
+            const matchId = `test-${i + 1}`;
+            const matchDate = new Date(now);
+            matchDate.setDate(matchDate.getDate() + i + 1);
+            const ref = db.collection("matches").doc(matchId);
+            batch.set(ref, {
+                id: matchId,
+                homeTeam: { id: `team-${i * 2 + 1}`, name: m.home },
+                awayTeam: { id: `team-${i * 2 + 2}`, name: m.away },
+                matchDate: matchDate.toISOString(),
+                status: "SCHEDULED",
+                homeScore: null,
+                awayScore: null,
+            });
+        }
+        await batch.commit();
+        res.status(200).json({ added: TEST_MATCHES.length, ids: TEST_MATCHES.map((_, i) => `test-${i + 1}`) });
+    }
+    catch (e) {
+        console.error(e);
+        res.status(500).send(String(e));
+    }
+});
+/**
+ * HTTP endpoint pour modifier l'état ou le score d'un match de test.
+ * POST body JSON: { matchId: string, status?: "SCHEDULED"|"IN_PLAY"|"FINISHED", homeScore?: number, awayScore?: number }
+ */
+exports.updateTestMatch = functions.https.onRequest(async (req, res) => {
+    if (req.method !== "POST") {
+        res.status(405).send("Method not allowed");
+        return;
+    }
+    try {
+        const body = typeof req.body === "object" ? req.body : {};
+        const { matchId, status, homeScore, awayScore } = body;
+        if (!matchId || typeof matchId !== "string") {
+            res.status(400).json({ error: "matchId (string) requis" });
+            return;
+        }
+        const updates = {};
+        if (status !== undefined) {
+            if (!["SCHEDULED", "TIMED", "IN_PLAY", "FINISHED"].includes(status)) {
+                res.status(400).json({ error: "status invalide: SCHEDULED, TIMED, IN_PLAY ou FINISHED" });
+                return;
+            }
+            updates.status = status;
+        }
+        if (homeScore !== undefined) {
+            updates.homeScore = typeof homeScore === "number" ? homeScore : null;
+        }
+        if (awayScore !== undefined) {
+            updates.awayScore = typeof awayScore === "number" ? awayScore : null;
+        }
+        if (Object.keys(updates).length === 0) {
+            res.status(400).json({ error: "Au moins un des champs: status, homeScore, awayScore" });
+            return;
+        }
+        const db = admin.firestore();
+        const ref = db.collection("matches").doc(matchId);
+        await ref.update(updates);
+        res.status(200).json({ matchId, updated: updates });
+    }
+    catch (e) {
+        console.error(e);
+        res.status(500).send(String(e));
+    }
+});
+/**
+ * HTTP endpoint pour déclencher manuellement le calcul des scores (utile en test).
+ * POST (aucun body requis)
+ */
+exports.calculateScoresManual = functions.https.onRequest(async (req, res) => {
+    if (req.method !== "POST") {
+        res.status(405).send("Method not allowed");
+        return;
+    }
+    try {
+        const db = admin.firestore();
+        const finished = await db
+            .collection("matches")
+            .where("status", "==", "FINISHED")
+            .get();
+        let totalUpdated = 0;
+        for (const matchDoc of finished.docs) {
+            const matchId = matchDoc.id;
+            const matchData = matchDoc.data();
+            const realHome = Number(matchData.homeScore ?? 0);
+            const realAway = Number(matchData.awayScore ?? 0);
+            const preds = await db
+                .collection("predictions")
+                .where("matchId", "==", matchId)
+                .get();
+            const batch = db.batch();
+            for (const predDoc of preds.docs) {
+                const data = predDoc.data();
+                const points = computePoints(data.homeScore ?? 0, data.awayScore ?? 0, realHome, realAway);
+                batch.update(predDoc.ref, { points });
+                totalUpdated++;
+            }
+            await batch.commit();
+        }
+        res.status(200).json({ matchesProcessed: finished.size, predictionsUpdated: totalUpdated });
+    }
+    catch (e) {
+        console.error(e);
+        res.status(500).send(String(e));
+    }
+});
 exports.calculateScores = functions.pubsub
     .schedule("every 30 minutes")
     .onRun(async () => {
