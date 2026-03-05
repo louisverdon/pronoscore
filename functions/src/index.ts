@@ -168,10 +168,50 @@ async function processFinishedMatch(
   const realHome = Number(matchData.homeScore ?? 0);
   const realAway = Number(matchData.awayScore ?? 0);
 
-  const preds = await db
+  // S'assurer que matchId est une string
+  const matchIdStr = String(matchId);
+
+  // Essayer d'abord avec matchId en string (format standard)
+  let preds = await db
     .collection("predictions")
-    .where("matchId", "==", matchId)
+    .where("matchId", "==", matchIdStr)
     .get();
+
+  // Si aucun pronostic trouvé et matchId ressemble à un nombre, essayer en number
+  if (preds.empty && /^\d+$/.test(matchIdStr)) {
+    preds = await db.collection("predictions").where("matchId", "==", Number(matchIdStr)).get();
+  }
+
+  // Dernier recours: récupérer tous les pronostics et filtrer par matchId en mémoire
+  // (gère les cas où matchId est stocké sous un format inattendu)
+  if (preds.empty) {
+    const allPreds = await db.collection("predictions").limit(500).get();
+    const filtered = allPreds.docs.filter((d) => {
+      const m = d.data().matchId;
+      return m === matchIdStr || m === matchId || String(m) === matchIdStr;
+    });
+    if (filtered.length > 0) {
+      preds = { docs: filtered, empty: false, size: filtered.length } as admin.firestore.QuerySnapshot;
+      functions.logger.info("processFinishedMatch: pronostics trouvés via fallback (filter)", {
+        matchId: matchIdStr,
+        count: filtered.length,
+      });
+    }
+  }
+
+  if (preds.empty) {
+    functions.logger.warn("processFinishedMatch: aucun pronostic trouvé", {
+      matchId: matchIdStr,
+      realScore: `${realHome}-${realAway}`,
+      hint: "Vérifiez dans Firestore que des documents 'predictions' existent avec matchId === '" + matchIdStr + "'",
+    });
+  }
+
+  functions.logger.info("processFinishedMatch", {
+    matchId: matchIdStr,
+    realScore: `${realHome}-${realAway}`,
+    predictionsFound: preds.size,
+  });
 
   const batch = db.batch();
   let updated = 0;
@@ -192,7 +232,10 @@ async function processFinishedMatch(
     }
     updated++;
   }
-  if (updated > 0) await batch.commit();
+  if (updated > 0) {
+    await batch.commit();
+    functions.logger.info("processFinishedMatch committed", { matchId: matchIdStr, updated });
+  }
   return updated;
 }
 
@@ -288,8 +331,39 @@ export const updateTestMatch = functions.https.onRequest(async (req, res) => {
 });
 
 /**
+ * Recalcule currentScore de tous les utilisateurs à partir de la somme des points
+ * des pronostics. Utile si processFinishedMatch n'a pas mis à jour les scores
+ * (ex: pronostics trouvés mais userId manquant, ou réparation manuelle).
+ */
+async function recalculateAllUserScores(db: admin.firestore.Firestore): Promise<void> {
+  const preds = await db.collection("predictions").get();
+  const scoreByUser = new Map<string, number>();
+
+  for (const doc of preds.docs) {
+    const data = doc.data();
+    const userId = data.userId;
+    if (!userId) continue;
+    const pts = data.points ?? 0;
+    scoreByUser.set(userId, (scoreByUser.get(userId) ?? 0) + pts);
+  }
+
+  const batch = db.batch();
+  for (const [userId, totalScore] of scoreByUser) {
+    const userRef = db.collection("users").doc(userId);
+    batch.set(userRef, { currentScore: totalScore }, { merge: true });
+  }
+  if (scoreByUser.size > 0) await batch.commit();
+  functions.logger.info("recalculateAllUserScores", {
+    usersUpdated: scoreByUser.size,
+    scores: Object.fromEntries(scoreByUser),
+  });
+}
+
+/**
  * HTTP endpoint pour déclencher manuellement le calcul des scores (utile en test).
  * POST (aucun body requis)
+ * Retourne des infos de diagnostic : matchIds traités, nombre de pronostics mis à jour.
+ * Si query param ?recalculate=1, recalcule aussi tous les currentScore depuis les pronostics.
  */
 export const calculateScoresManual = functions.https.onRequest(async (req, res) => {
   if (req.method !== "POST") {
@@ -303,13 +377,28 @@ export const calculateScoresManual = functions.https.onRequest(async (req, res) 
       .where("status", "==", "FINISHED")
       .get();
 
+    const details: { matchId: string; updated: number }[] = [];
     let totalUpdated = 0;
     for (const matchDoc of finished.docs) {
-      totalUpdated += await processFinishedMatch(db, matchDoc.id, matchDoc.data());
+      const n = await processFinishedMatch(db, matchDoc.id, matchDoc.data());
+      totalUpdated += n;
+      details.push({ matchId: matchDoc.id, updated: n });
     }
-    res.status(200).json({ matchesProcessed: finished.size, predictionsUpdated: totalUpdated });
+
+    // Option recalculate: recalculer currentScore depuis la somme des points des pronostics
+    const recalc = req.query?.recalculate === "1" || req.query?.recalculate === "true";
+    if (recalc) {
+      await recalculateAllUserScores(db);
+    }
+
+    res.status(200).json({
+      matchesProcessed: finished.size,
+      predictionsUpdated: totalUpdated,
+      details,
+      recalculated: recalc,
+    });
   } catch (e) {
-    console.error(e);
+    functions.logger.error("calculateScoresManual error", e);
     res.status(500).send(String(e));
   }
 });
@@ -318,19 +407,28 @@ export const calculateScores = functions.pubsub
   .schedule("every 30 minutes")
   .onRun(async () => {
     const db = admin.firestore();
-    const finished = await db
-      .collection("matches")
-      .where("status", "==", "FINISHED")
-      .get();
-
-    for (const matchDoc of finished.docs) {
-      await processFinishedMatch(db, matchDoc.id, matchDoc.data());
-    }
+    await processAllFinishedMatches(db);
     return null;
   });
 
 /**
- * Déclenche le calcul des scores dès qu'un match passe à FINISHED.
+ * Traite tous les matchs terminés (appelé par onMatchFinished et calculateScores).
+ * Traiter tous les matchs en une seule exécution évite les conditions de concurrence
+ * quand plusieurs matchs se terminent simultanément (un seul batch d'incréments par user).
+ */
+async function processAllFinishedMatches(db: admin.firestore.Firestore): Promise<void> {
+  const finished = await db
+    .collection("matches")
+    .where("status", "==", "FINISHED")
+    .get();
+
+  for (const matchDoc of finished.docs) {
+    await processFinishedMatch(db, matchDoc.id, matchDoc.data());
+  }
+}
+
+/**
+ * Déclenche le calcul des scores dès qu'un match passe à FINISHED (onUpdate).
  */
 export const onMatchFinished = functions.firestore
   .document("matches/{matchId}")
@@ -338,8 +436,32 @@ export const onMatchFinished = functions.firestore
     const after = change.after.data();
     if (after.status !== "FINISHED") return null;
 
-    const matchId = context.params.matchId as string;
+    const matchId = String(context.params.matchId);
     const db = admin.firestore();
+    functions.logger.info("onMatchFinished triggered", { matchId });
+
+    // 1. Traiter d'abord le match déclencheur (évite la cohérence éventuelle)
     await processFinishedMatch(db, matchId, after);
+
+    // 2. Traiter les autres matchs terminés (plusieurs matchs peuvent finir en même temps)
+    await processAllFinishedMatches(db);
+    return null;
+  });
+
+/**
+ * Déclenche le calcul des scores quand un match est créé avec status FINISHED.
+ * (ex: sync API qui crée un match déjà terminé)
+ */
+export const onMatchCreated = functions.firestore
+  .document("matches/{matchId}")
+  .onCreate(async (snap, context) => {
+    const data = snap.data();
+    if (data.status !== "FINISHED") return null;
+
+    const matchId = String(context.params.matchId);
+    const db = admin.firestore();
+    functions.logger.info("onMatchCreated (FINISHED) triggered", { matchId });
+
+    await processFinishedMatch(db, matchId, data);
     return null;
   });
