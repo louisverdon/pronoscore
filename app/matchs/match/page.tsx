@@ -92,24 +92,24 @@ function MatchPronosticsContent() {
         ) : (
           <>
             <div className="mb-8 rounded-xl border border-zinc-200 bg-white p-6">
-              <div className="flex items-center justify-between gap-4 text-2xl font-bold">
-                <div className="flex flex-1 items-center justify-start gap-3">
+              <div className="flex items-center justify-between gap-4 text-2xl font-bold text-zinc-900">
+                <div className="flex min-w-0 flex-1 items-center justify-start gap-3">
                   {match.homeTeam.crest && (
                     <img
                       src={match.homeTeam.crest}
                       alt=""
-                      className="h-10 w-10 object-contain"
+                      className="h-10 w-10 shrink-0 object-contain"
                     />
                   )}
-                  <span>{match.homeTeam.name}</span>
+                  <span className="break-words line-clamp-2">{match.homeTeam.name}</span>
                 </div>
                 <span className="shrink-0">
                   {match.status === "FINISHED"
                     ? `${match.homeScore ?? "-"} - ${match.awayScore ?? "-"}`
                     : "vs"}
                 </span>
-                <div className="flex flex-1 items-center justify-end gap-3">
-                  <span>{match.awayTeam.name}</span>
+                <div className="flex min-w-0 flex-1 items-center justify-end gap-3">
+                  <span className="break-words line-clamp-2 text-right">{match.awayTeam.name}</span>
                   {match.awayTeam.crest && (
                     <img
                       src={match.awayTeam.crest}
@@ -147,7 +147,7 @@ function MatchPronosticsContent() {
                           {p.userName.charAt(0)}
                         </div>
                       )}
-                      <span className="font-medium">{p.userName}</span>
+                      <span className="font-medium text-zinc-900">{p.userName}</span>
                     </div>
                     <span className="text-lg font-bold">
                       {p.homeScore} - {p.awayScore}

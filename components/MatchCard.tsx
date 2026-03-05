@@ -87,7 +87,7 @@ export default function MatchCard({
         )}
       </div>
       <div className="relative flex items-center gap-4">
-        <div className="flex min-w-0 flex-1 items-center justify-start gap-2 font-medium">
+        <div className="flex min-w-0 flex-1 items-center justify-start gap-2 font-medium text-zinc-900">
           {match.homeTeam.crest && (
             <img
               src={match.homeTeam.crest}
@@ -95,7 +95,7 @@ export default function MatchCard({
               className="h-6 w-6 shrink-0 object-contain"
             />
           )}
-          <span className="truncate">{match.homeTeam.name}</span>
+          <span className="break-words line-clamp-2">{match.homeTeam.name}</span>
         </div>
         <div className="flex shrink-0 basis-44 items-center justify-center">
           {isFinished ? (
@@ -139,8 +139,8 @@ export default function MatchCard({
             <span className="text-zinc-400">—</span>
           )}
         </div>
-        <div className="flex min-w-0 flex-1 items-center justify-end gap-2 font-medium">
-          <span className="truncate">{match.awayTeam.name}</span>
+        <div className="flex min-w-0 flex-1 items-center justify-end gap-2 font-medium text-zinc-900">
+          <span className="break-words line-clamp-2 text-right">{match.awayTeam.name}</span>
           {match.awayTeam.crest && (
             <img
               src={match.awayTeam.crest}
