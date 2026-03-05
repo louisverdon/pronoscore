@@ -10,7 +10,7 @@ export default function Nav() {
     <nav className="border-b border-zinc-200 bg-white">
       <div className="mx-auto flex max-w-4xl items-center justify-between px-4 py-3">
         <Link href="/" className="text-lg font-bold text-blue-600">
-          Pronoscore
+          PronoScore
         </Link>
         {user && (
           <div className="flex items-center gap-4">

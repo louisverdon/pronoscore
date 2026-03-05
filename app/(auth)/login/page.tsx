@@ -30,7 +30,7 @@ export default function LoginPage() {
     <div className="flex min-h-screen flex-col items-center justify-center bg-gradient-to-b from-slate-50 to-slate-100 p-4">
       <div className="w-full max-w-sm rounded-2xl bg-white p-8 shadow-lg">
         <h1 className="mb-2 text-2xl font-bold text-zinc-900">
-          Pronoscore Ligue 1
+          PronoScore
         </h1>
         <p className="mb-6 text-sm text-zinc-600">
           Connectez-vous pour enregistrer vos pronostics et défier vos amis.

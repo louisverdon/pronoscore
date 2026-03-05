@@ -60,15 +60,17 @@ export default function MatchsPage() {
           </div>
         )}
 
-        <h2 className="mt-12 mb-4 text-xl font-bold text-zinc-900">
-          Matchs récents
-        </h2>
         {!loadingMatches && recent.length > 0 && (
-          <div className="space-y-4">
-            {recent.slice(0, 10).map((m) => (
-              <MatchCard key={m.id} match={m} />
-            ))}
-          </div>
+          <>
+            <h2 className="mt-12 mb-4 text-xl font-bold text-zinc-900">
+              Matchs récents
+            </h2>
+            <div className="space-y-4">
+              {recent.slice(0, 10).map((m) => (
+                <MatchCard key={m.id} match={m} />
+              ))}
+            </div>
+          </>
         )}
       </main>
     </div>

@@ -35,7 +35,7 @@ export default function MesPronosticsPage() {
         withMatches.sort((a, b) => {
           const da = a.match?.matchDate ?? "";
           const db = b.match?.matchDate ?? "";
-          return db.localeCompare(da);
+          return da.localeCompare(db);
         });
         setPredictions(withMatches);
         setLoadingData(false);
@@ -87,12 +87,16 @@ export default function MesPronosticsPage() {
                         </span>
                       )}
                     </div>
-                    <div className="flex items-center justify-between font-medium">
-                      <span>{p.match.homeTeam.name}</span>
-                      <span className="text-lg">
+                    <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 font-medium">
+                      <span className="min-w-0 truncate text-right">
+                        {p.match.homeTeam.name}
+                      </span>
+                      <span className="text-center text-lg tabular-nums">
                         {p.homeScore} - {p.awayScore}
                       </span>
-                      <span>{p.match.awayTeam.name}</span>
+                      <span className="min-w-0 truncate">
+                        {p.match.awayTeam.name}
+                      </span>
                     </div>
                     {p.match.status === "FINISHED" && (
                       <div className="mt-2 text-sm text-zinc-600">
