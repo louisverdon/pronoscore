@@ -3,7 +3,6 @@
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
-import Link from "next/link";
 
 export default function HomePage() {
   const { user, loading } = useAuth();
@@ -19,7 +18,8 @@ export default function HomePage() {
     }
   }, [user, loading, router]);
 
-  if (loading) {
+  // Afficher le chargement pendant la redirection (vers /login si non connecté, /matchs si connecté)
+  if (loading || !user) {
     return (
       <div className="flex min-h-screen items-center justify-center">
         <div className="text-zinc-500">Chargement...</div>
@@ -27,15 +27,5 @@ export default function HomePage() {
     );
   }
 
-  return (
-    <div className="flex min-h-screen flex-col items-center justify-center gap-6 p-8">
-      <h1 className="text-2xl font-bold">Pronoscore</h1>
-      <Link
-        href="/login"
-        className="rounded-lg bg-blue-600 px-4 py-2 text-white hover:bg-blue-700"
-      >
-        Se connecter
-      </Link>
-    </div>
-  );
+  return null;
 }

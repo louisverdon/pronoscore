@@ -187,3 +187,4 @@ Invoke-WebRequest -Method POST -Uri "https://REGION-PROJECT_ID.cloudfunctions.ne
 3. `updateTestMatch` avec `status: "FINISHED"` et scores pour clôturer un match
 4. `calculateScoresManual` — mettre à jour les points
 5. Vérifier le classement sur **/classement**
+
