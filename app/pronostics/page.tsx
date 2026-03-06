@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useState, useMemo } from "react";
-import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/lib/auth-context";
 import { getUserPredictions } from "@/lib/predictions";
+import RequireAuth from "@/components/RequireAuth";
 import { getMatch } from "@/lib/matches";
 import { computePoints } from "@/lib/points";
 import type { Prediction, Match } from "@/lib/types";
@@ -27,9 +27,8 @@ interface PredictionWithMatch extends Prediction {
   match?: Match | null;
 }
 
-export default function MesPronosticsPage() {
-  const { user, loading } = useAuth();
-  const router = useRouter();
+function MesPronosticsPageContent() {
+  const { user } = useAuth();
   const [predictions, setPredictions] = useState<PredictionWithMatch[]>([]);
   const [loadingData, setLoadingData] = useState(true);
   const [expandedMatchdays, setExpandedMatchdays] = useState<Set<number>>(new Set());
@@ -65,10 +64,6 @@ export default function MesPronosticsPage() {
   };
 
   useEffect(() => {
-    if (!loading && !user) {
-      router.replace("/login");
-      return;
-    }
     if (user) {
       const load = () => {
         getUserPredictions(user!.uid).then(async (preds) => {
@@ -94,15 +89,7 @@ export default function MesPronosticsPage() {
       const interval = setInterval(load, 60_000);
       return () => clearInterval(interval);
     }
-  }, [user, loading, router]);
-
-  if (loading || !user) {
-    return (
-      <div className="flex min-h-screen items-center justify-center">
-        <div className="text-zinc-500">Chargement...</div>
-      </div>
-    );
-  }
+  }, [user]);
 
   return (
     <div className="min-h-screen bg-zinc-50">
@@ -238,5 +225,13 @@ export default function MesPronosticsPage() {
         )}
       </main>
     </div>
+  );
+}
+
+export default function MesPronosticsPage() {
+  return (
+    <RequireAuth>
+      <MesPronosticsPageContent />
+    </RequireAuth>
   );
 }

@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useAuth } from "@/lib/auth-context";
+import Avatar from "@/components/Avatar";
 
 export default function Nav() {
   const { user, signOut } = useAuth();
@@ -33,14 +34,11 @@ export default function Nav() {
               Classement
             </Link>
             <div className="flex items-center gap-2">
-              {user.avatar && (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={user.avatar}
-                  alt=""
-                  className="h-8 w-8 rounded-full"
-                />
-              )}
+              <Avatar
+                src={user.avatar}
+                name={user.name ?? user.displayName ?? "Utilisateur"}
+                size="sm"
+              />
               <button
                 onClick={signOut}
                 className="rounded bg-zinc-200 px-3 py-1 text-sm hover:bg-zinc-300"

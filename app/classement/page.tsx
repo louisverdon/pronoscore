@@ -1,23 +1,19 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { getRanking } from "@/lib/ranking";
 import type { RankingEntry } from "@/lib/types";
 import Nav from "@/components/Nav";
+import RequireAuth from "@/components/RequireAuth";
+import Avatar from "@/components/Avatar";
 
-export default function ClassementPage() {
-  const { user, loading } = useAuth();
-  const router = useRouter();
+function ClassementPageContent() {
+  const { user } = useAuth();
   const [ranking, setRanking] = useState<RankingEntry[]>([]);
   const [loadingRanking, setLoadingRanking] = useState(true);
 
   useEffect(() => {
-    if (!loading && !user) {
-      router.replace("/login");
-      return;
-    }
     if (user) {
       getRanking().then((r) => {
         setRanking(r);
@@ -28,15 +24,7 @@ export default function ClassementPage() {
       }, 60_000);
       return () => clearInterval(interval);
     }
-  }, [user, loading, router]);
-
-  if (loading || !user) {
-    return (
-      <div className="flex min-h-screen items-center justify-center">
-        <div className="text-zinc-500">Chargement...</div>
-      </div>
-    );
-  }
+  }, [user]);
 
   return (
     <div className="min-h-screen bg-zinc-50">
@@ -75,18 +63,7 @@ export default function ClassementPage() {
                   >
                     {r.rank}
                   </span>
-                  {r.userAvatar ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={r.userAvatar}
-                      alt=""
-                      className="h-10 w-10 rounded-full"
-                    />
-                  ) : (
-                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-zinc-200 font-medium">
-                      {r.userName.charAt(0)}
-                    </div>
-                  )}
+                  <Avatar src={r.userAvatar} name={r.userName} size="md" />
                   <div>
                     <span className="font-medium">
                       {r.userName}
@@ -114,5 +91,13 @@ export default function ClassementPage() {
         )}
       </main>
     </div>
+  );
+}
+
+export default function ClassementPage() {
+  return (
+    <RequireAuth>
+      <ClassementPageContent />
+    </RequireAuth>
   );
 }

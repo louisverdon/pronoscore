@@ -1,39 +1,26 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { getUpcomingMatches } from "@/lib/matches";
 import MatchCard from "@/components/MatchCard";
 import type { Match } from "@/lib/types";
 import Nav from "@/components/Nav";
+import RequireAuth from "@/components/RequireAuth";
 
-export default function MatchsPage() {
-  const { user, loading } = useAuth();
-  const router = useRouter();
+function MatchsPageContent() {
+  const { user } = useAuth();
   const [upcoming, setUpcoming] = useState<Match[]>([]);
   const [loadingMatches, setLoadingMatches] = useState(true);
 
   useEffect(() => {
-    if (!loading && !user) {
-      router.replace("/login");
-      return;
-    }
     if (user) {
       getUpcomingMatches().then((u) => {
         setUpcoming(u);
         setLoadingMatches(false);
       });
     }
-  }, [user, loading, router]);
-
-  if (loading || !user) {
-    return (
-      <div className="flex min-h-screen items-center justify-center">
-        <div className="text-zinc-500">Chargement...</div>
-      </div>
-    );
-  }
+  }, [user]);
 
   return (
     <div className="min-h-screen bg-zinc-50">
@@ -57,5 +44,13 @@ export default function MatchsPage() {
         )}
       </main>
     </div>
+  );
+}
+
+export default function MatchsPage() {
+  return (
+    <RequireAuth>
+      <MatchsPageContent />
+    </RequireAuth>
   );
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, Suspense } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/lib/auth-context";
 import { getMatch } from "@/lib/matches";
@@ -11,10 +11,11 @@ import { db } from "@/lib/firebase";
 import { getDisplayName } from "@/lib/user";
 import type { Match, Prediction, User } from "@/lib/types";
 import Nav from "@/components/Nav";
+import RequireAuth from "@/components/RequireAuth";
+import Avatar from "@/components/Avatar";
 
 function MatchPronosticsContent() {
-  const { user, loading } = useAuth();
-  const router = useRouter();
+  const { user } = useAuth();
   const searchParams = useSearchParams();
   const matchId = searchParams.get("id") ?? "";
   const [match, setMatch] = useState<Match | null>(null);
@@ -24,10 +25,6 @@ function MatchPronosticsContent() {
   const [loadingData, setLoadingData] = useState(true);
 
   useEffect(() => {
-    if (!loading && !user) {
-      router.replace("/login");
-      return;
-    }
     if (!matchId || !user) {
       if (!matchId) setLoadingData(false);
       return;
@@ -64,15 +61,7 @@ function MatchPronosticsContent() {
       setLoadingData(false);
     };
     load();
-  }, [user, loading, router, matchId]);
-
-  if (loading || !user) {
-    return (
-      <div className="flex min-h-screen items-center justify-center">
-        <div className="text-zinc-500">Chargement...</div>
-      </div>
-    );
-  }
+  }, [user, matchId]);
 
   return (
     <div className="min-h-screen bg-zinc-50">
@@ -135,18 +124,11 @@ function MatchPronosticsContent() {
                     className="flex items-center justify-between rounded-lg border border-zinc-200 bg-white p-4"
                   >
                     <div className="flex items-center gap-3">
-                      {p.userAvatar ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={p.userAvatar}
-                          alt=""
-                          className="h-8 w-8 rounded-full"
-                        />
-                      ) : (
-                        <div className="flex h-8 w-8 items-center justify-center rounded-full bg-zinc-200 text-sm">
-                          {p.userName.charAt(0)}
-                        </div>
-                      )}
+                      <Avatar
+                        src={p.userAvatar}
+                        name={p.userName}
+                        size="sm"
+                      />
                       <span className="font-medium text-zinc-900">{p.userName}</span>
                     </div>
                     <span className="text-lg font-bold">
@@ -170,12 +152,14 @@ function MatchPronosticsContent() {
 
 export default function MatchPronosticsPage() {
   return (
-    <Suspense fallback={
-      <div className="flex min-h-screen items-center justify-center">
-        <div className="text-zinc-500">Chargement...</div>
-      </div>
-    }>
-      <MatchPronosticsContent />
-    </Suspense>
+    <RequireAuth>
+      <Suspense fallback={
+        <div className="flex min-h-screen items-center justify-center">
+          <div className="text-zinc-500">Chargement...</div>
+        </div>
+      }>
+        <MatchPronosticsContent />
+      </Suspense>
+    </RequireAuth>
   );
 }

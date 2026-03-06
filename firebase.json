@@ -4,6 +4,30 @@
     "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
     "rewrites": [
       {
+        "source": "/matchs/match",
+        "destination": "/matchs/match.html"
+      },
+      {
+        "source": "/matchs/**",
+        "destination": "/matchs.html"
+      },
+      {
+        "source": "/matchs",
+        "destination": "/matchs.html"
+      },
+      {
+        "source": "/classement",
+        "destination": "/classement.html"
+      },
+      {
+        "source": "/pronostics",
+        "destination": "/pronostics.html"
+      },
+      {
+        "source": "/login",
+        "destination": "/login.html"
+      },
+      {
         "source": "**",
         "destination": "/index.html"
       }
