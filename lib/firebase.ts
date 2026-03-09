@@ -1,6 +1,6 @@
 import { initializeApp, getApps, FirebaseApp } from "firebase/app";
-import { getAuth, Auth } from "firebase/auth";
-import { getFirestore, Firestore } from "firebase/firestore";
+import { getAuth, Auth, connectAuthEmulator } from "firebase/auth";
+import { getFirestore, Firestore, connectFirestoreEmulator } from "firebase/firestore";
 
 // Use env vars; fallbacks allow build to succeed without .env.local
 const firebaseConfig = {
@@ -27,6 +27,11 @@ if (getApps().length === 0) {
   app = initializeApp(firebaseConfig);
   auth = getAuth(app);
   db = getFirestore(app);
+
+  if (typeof window !== "undefined" && process.env.NEXT_PUBLIC_USE_EMULATORS === "true") {
+    connectFirestoreEmulator(db, "127.0.0.1", 8080);
+    connectAuthEmulator(auth, "http://127.0.0.1:9099", { disableWarnings: true });
+  }
 } else {
   app = getApps()[0] as FirebaseApp;
   auth = getAuth(app);

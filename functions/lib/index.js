@@ -19,7 +19,6 @@ async function getMatchesUrlForCurrentSeasonAndNextMatchday() {
     const params = new URLSearchParams({
         dateFrom,
         dateTo,
-        status: "SCHEDULED",
     });
     return `${FL1_MATCHES_URL}?${params.toString()}`;
 }
