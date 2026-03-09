@@ -68,6 +68,38 @@ curl -X POST https://REGION-PROJECT_ID.cloudfunctions.net/syncMatchesManual
 
 ## Développement
 
+### 1. Variables d'environnement pour l'émulateur
+
+Pour que le sync des matchs fonctionne en dev (base vide), créez `functions/.env` :
+
+```
+FOOTBALL_API_KEY=votre_cle_api_football_data_org
+```
+
+Puis démarrez l'émulateur :
+
+```bash
+firebase emulators:start --only functions,firestore
+```
+
+### 2. Premier sync des matchs (base vide)
+
+Avec l'émulateur actif, appelez `syncMatchesManual` pour peupler la base avec les prochains matchs Ligue 1 (aujourd'hui + 14 jours) :
+
+```powershell
+# PowerShell
+Invoke-WebRequest -Method POST -Uri "http://127.0.0.1:5001/pronoscore-e143b/us-central1/syncMatchesManual"
+```
+
+```bash
+# Bash
+curl -X POST http://127.0.0.1:5001/pronoscore-e143b/us-central1/syncMatchesManual
+```
+
+Adaptez la région si l’URL échoue L'émulateur affiche l'URL exacte.
+
+### 3. Lancer l'app
+
 ```bash
 npm run dev
 ```

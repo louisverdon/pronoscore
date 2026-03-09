@@ -1,0 +1,4 @@
+16:37:44.251 [NamespaceSystem-akka.actor.default-dispatcher-4] INFO akka.event.slf4j.Slf4jLogger - Slf4jLogger started
+16:37:44.419 [main] INFO com.firebase.server.forge.App$ - Listening at 127.0.0.1:9000
+16:37:59.088 [NamespaceSystem-akka.actor.default-dispatcher-4] INFO com.firebase.core.namespace.NamespaceActor - pronoscore-e143b-default-rtdb successfully activated FBKV (SurveyIdle(0)) wait: 150ms, init: 0ms
+16:37:59.167 [NamespaceSystem-blocking-namespace-operation-dispatcher-6] INFO com.firebase.core.namespace.StateManager - Namespace pronoscore-e143b-default-rtdb status Active to Active

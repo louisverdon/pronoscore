@@ -7,19 +7,30 @@ admin.initializeApp();
 const FOOTBALL_API_KEY = process.env.FOOTBALL_API_KEY || "";
 const FL1_BASE = "https://api.football-data.org/v4/competitions/FL1";
 const FL1_MATCHES_URL = `${FL1_BASE}/matches`;
-async function getMatchesUrlForCurrentSeasonAndNextMatchday() {
+/**
+ * Vérifie si on doit récupérer les prochains matchs (7 jours) :
+ * - Oui si la base est vide
+ * - Oui si tous les matchs en base sont FINISHED
+ * - Non sinon
+ */
+async function shouldFetchUpcomingMatches(db) {
+    const snapshot = await db.collection("matches").get();
+    if (snapshot.empty)
+        return true;
+    const allFinished = snapshot.docs.every((d) => d.data().status === "FINISHED");
+    return allFinished;
+}
+/**
+ * Retourne l'URL pour récupérer les prochains matchs de la journée et des jours à venir.
+ * Utilise dateFrom/dateTo pour couvrir aujourd'hui + 7 jours.
+ */
+function getMatchesUrlForUpcomingMatches() {
     const today = new Date();
-    // Calcul du prochain mardi
-    const nextTuesday = new Date(today);
-    const day = today.getDay(); // 0=Dimanche ... 2=Mardi
-    const daysUntilTuesday = (2 - day + 7) % 7 || 7;
-    nextTuesday.setDate(today.getDate() + daysUntilTuesday);
+    const future = new Date(today);
+    future.setDate(future.getDate() + 7);
     const dateFrom = today.toISOString().split("T")[0];
-    const dateTo = nextTuesday.toISOString().split("T")[0];
-    const params = new URLSearchParams({
-        dateFrom,
-        dateTo,
-    });
+    const dateTo = future.toISOString().split("T")[0];
+    const params = new URLSearchParams({ dateFrom, dateTo });
     return `${FL1_MATCHES_URL}?${params.toString()}`;
 }
 function toFirestoreMatch(m) {
@@ -56,14 +67,21 @@ exports.syncMatchesManual = functions.https.onRequest(async (req, res) => {
         return;
     }
     try {
-        const matchesUrl = await getMatchesUrlForCurrentSeasonAndNextMatchday();
+        const db = admin.firestore();
+        if (!(await shouldFetchUpcomingMatches(db))) {
+            res.status(200).json({
+                synced: 0,
+                reason: "Base contains non-finished matches, skipping fetch",
+            });
+            return;
+        }
+        const matchesUrl = getMatchesUrlForUpcomingMatches();
         const apiRes = await fetch(matchesUrl, {
             headers: { "X-Auth-Token": FOOTBALL_API_KEY },
         });
         if (!apiRes.ok)
             throw new Error(`API error: ${apiRes.status}`);
         const data = await apiRes.json();
-        const db = admin.firestore();
         const batch = db.batch();
         for (const m of data.matches) {
             const fm = toFirestoreMatch(m);
@@ -88,7 +106,12 @@ exports.syncMatches = functions.pubsub
         console.warn("FOOTBALL_API_KEY not set, skipping sync");
         return null;
     }
-    const matchesUrl = await getMatchesUrlForCurrentSeasonAndNextMatchday();
+    const db = admin.firestore();
+    if (!(await shouldFetchUpcomingMatches(db))) {
+        console.log("Base contains non-finished matches, skipping upcoming matches fetch");
+        return null;
+    }
+    const matchesUrl = getMatchesUrlForUpcomingMatches();
     const res = await fetch(matchesUrl, {
         headers: { "X-Auth-Token": FOOTBALL_API_KEY },
     });
@@ -96,7 +119,6 @@ exports.syncMatches = functions.pubsub
         throw new Error(`Football API error: ${res.status}`);
     }
     const data = await res.json();
-    const db = admin.firestore();
     const batch = db.batch();
     for (const m of data.matches) {
         const fm = toFirestoreMatch(m);

@@ -90,12 +90,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               uid: fbUser.uid,
               name: fbUser.displayName || "Utilisateur",
               email: fbUser.email || "",
-              avatar: fbUser.photoURL || undefined,
+              ...(fbUser.photoURL ? { avatar: fbUser.photoURL } : {}),
               createdAt: new Date().toISOString(),
               hasCompletedOnboarding: false,
               currentScore: 0,
             };
-            await setDoc(doc(db, "users", fbUser.uid), newUser);
+            // Firestore rejette undefined – on enlève les champs undefined
+            const dataForFirestore = Object.fromEntries(
+              Object.entries(newUser).filter(([, v]) => v !== undefined)
+            );
+            await setDoc(doc(db, "users", fbUser.uid), dataForFirestore);
             setUser(newUser);
           }
         } else {

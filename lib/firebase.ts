@@ -28,9 +28,11 @@ if (getApps().length === 0) {
   auth = getAuth(app);
   db = getFirestore(app);
 
-  if (typeof window !== "undefined" && process.env.NEXT_PUBLIC_USE_EMULATORS === "true") {
+  if (process.env.NEXT_PUBLIC_USE_EMULATORS === "true") {
     connectFirestoreEmulator(db, "127.0.0.1", 8080);
-    connectAuthEmulator(auth, "http://127.0.0.1:9099", { disableWarnings: true });
+    if (typeof window !== "undefined") {
+      connectAuthEmulator(auth, "http://127.0.0.1:9099", { disableWarnings: true });
+    }
   }
 } else {
   app = getApps()[0] as FirebaseApp;
