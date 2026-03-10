@@ -100,7 +100,7 @@ function ClassementContent() {
                   </span>
                   <Avatar src={r.userAvatar} name={r.userName} size="md" />
                   <div>
-                    <span className="font-medium">
+                    <span className="font-medium text-zinc-900">
                       {r.userName}
                       {r.userId === user?.uid && (
                         <span className="ml-2 text-sm text-blue-600">(vous)</span>
