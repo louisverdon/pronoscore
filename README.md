@@ -68,37 +68,54 @@ curl -X POST https://REGION-PROJECT_ID.cloudfunctions.net/syncMatchesManual
 
 ## Développement
 
-### 1. Variables d'environnement pour l'émulateur
+### 1. Variables d'environnement
 
-Pour que le sync des matchs fonctionne en dev (base vide), créez `functions/.env` :
+- **App** : `.env.local` avec `NEXT_PUBLIC_USE_EMULATORS=true` pour Auth/Firestore.
+- **Functions** (optionnel, pour sync matchs réels) : `functions/.env` avec `FOOTBALL_API_KEY=...`.
 
-```
-FOOTBALL_API_KEY=votre_cle_api_football_data_org
-```
-
-Puis démarrez l'émulateur :
+### 2. Démarrer les émulateurs
 
 ```bash
-firebase emulators:start --only functions,firestore
+firebase emulators:start
 ```
 
-### 2. Premier sync des matchs (base vide)
+L'UI des émulateurs : [http://localhost:4000](http://localhost:4000).
 
-Avec l'émulateur actif, appelez `syncMatchesManual` pour peupler la base avec les prochains matchs Ligue 1 (aujourd'hui + 14 jours) :
+### 3. Initialiser les premiers matchs dans l'émulateur
+
+Avec les émulateurs actifs, deux possibilités :
+
+#### Option A : Matchs fictifs (recommandé, pas de clé API)
+
+5 matchs de test via `addTestMatches` :
 
 ```powershell
 # PowerShell
-Invoke-WebRequest -Method POST -Uri "http://127.0.0.1:5001/pronoscore-e143b/us-central1/syncMatchesManual"
+Invoke-WebRequest -Method POST -UseBasicParsing -Uri "http://127.0.0.1:5001/pronoscore-e143b/us-central1/addTestMatches"
 ```
 
 ```bash
 # Bash
+curl -X POST http://127.0.0.1:5001/pronoscore-e143b/us-central1/addTestMatches
+```
+
+#### Option B : Vrais matchs Ligue 1 (clé football-data.org requise)
+
+1. Créez `functions/.env` avec `FOOTBALL_API_KEY=votre_cle`.
+2. Redémarrez les émulateurs.
+3. Appelez `syncMatchesManual` :
+
+```powershell
+Invoke-WebRequest -Method POST -UseBasicParsing -Uri "http://127.0.0.1:5001/pronoscore-e143b/us-central1/syncMatchesManual"
+```
+
+```bash
 curl -X POST http://127.0.0.1:5001/pronoscore-e143b/us-central1/syncMatchesManual
 ```
 
-Adaptez la région si l’URL échoue L'émulateur affiche l'URL exacte.
+> L'émulateur affiche l'URL exacte au démarrage si la région diffère.
 
-### 3. Lancer l'app
+### 4. Lancer l'app
 
 ```bash
 npm run dev
@@ -151,7 +168,7 @@ curl -X POST https://REGION-PROJECT_ID.cloudfunctions.net/addTestMatches
 
 ```powershell
 # PowerShell (Windows)
-Invoke-WebRequest -Method POST -Uri "https://REGION-PROJECT_ID.cloudfunctions.net/addTestMatches"
+Invoke-WebRequest -Method POST -UseBasicParsing -Uri "https://REGION-PROJECT_ID.cloudfunctions.net/addTestMatches"
 ```
 
 Cela crée 5 matchs avec les IDs `test-1` à `test-5` :
@@ -188,7 +205,7 @@ curl -X POST https://REGION-PROJECT_ID.cloudfunctions.net/updateTestMatch \
 
 ```powershell
 # PowerShell (Windows)
-Invoke-WebRequest -Method POST -Uri "https://REGION-PROJECT_ID.cloudfunctions.net/updateTestMatch" -ContentType "application/json" -Body '{"matchId": "test-1", "status": "FINISHED", "homeScore": 2, "awayScore": 1}'
+Invoke-WebRequest -Method POST -UseBasicParsing -Uri "https://REGION-PROJECT_ID.cloudfunctions.net/updateTestMatch" -ContentType "application/json" -Body '{"matchId": "test-1", "status": "FINISHED", "homeScore": 2, "awayScore": 1}'
 ```
 
 Paramètres possibles (tous optionnels sauf `matchId`) :
@@ -209,7 +226,7 @@ curl -X POST https://REGION-PROJECT_ID.cloudfunctions.net/calculateScoresManual
 
 ```powershell
 # PowerShell (Windows)
-Invoke-WebRequest -Method POST -Uri "https://REGION-PROJECT_ID.cloudfunctions.net/calculateScoresManual"
+Invoke-WebRequest -Method POST -UseBasicParsing -Uri "https://REGION-PROJECT_ID.cloudfunctions.net/calculateScoresManual"
 ```
 
 ### Workflow de test complet

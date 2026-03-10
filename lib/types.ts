@@ -58,3 +58,17 @@ export interface RankingEntry {
   exactScores: number;
   rank: number;
 }
+
+export interface League {
+  id: string;
+  name: string;
+  createdBy: string;
+  createdAt: string;
+  inviteCode: string;
+}
+
+export interface LeagueMember {
+  leagueId: string;
+  userId: string;
+  joinedAt: string;
+}

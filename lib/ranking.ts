@@ -3,9 +3,21 @@ import { db } from "./firebase";
 import { getDisplayName } from "./user";
 import { getOngoingMatches } from "./matches";
 import { computePoints } from "./points";
+import { getLeagueMemberIds } from "./leagues";
 import type { RankingEntry, User } from "./types";
 
-export async function getRanking(): Promise<RankingEntry[]> {
+/**
+ * Retourne le classement. Si leagueId est fourni, uniquement les membres de cette ligue.
+ * Sinon, classement global (tous les utilisateurs).
+ */
+export async function getRanking(leagueId?: string | null): Promise<RankingEntry[]> {
+  let allowedUserIds: Set<string> | null = null;
+  if (leagueId) {
+    const ids = await getLeagueMemberIds(leagueId);
+    allowedUserIds = new Set(ids);
+    if (allowedUserIds.size === 0) return [];
+  }
+
   const [predictionsSnap, ongoingMatches] = await Promise.all([
     getDocs(collection(db, "predictions")),
     getOngoingMatches(),
@@ -21,6 +33,7 @@ export async function getRanking(): Promise<RankingEntry[]> {
     const data = predDoc.data();
     const userId = data.userId;
     if (!userId) continue;
+    if (allowedUserIds && !allowedUserIds.has(userId)) continue;
     if (!pointsByUser[userId]) {
       pointsByUser[userId] = { totalPoints: 0, exactScores: 0 };
     }

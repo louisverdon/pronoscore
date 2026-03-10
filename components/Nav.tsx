@@ -33,6 +33,12 @@ export default function Nav() {
             >
               Classement
             </Link>
+            <Link
+              href="/ligues"
+              className="text-sm text-zinc-600 hover:text-zinc-900"
+            >
+              Mes ligues
+            </Link>
             <div className="flex items-center gap-2">
               <Avatar
                 src={user.avatar}

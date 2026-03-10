@@ -1,18 +1,20 @@
 "use client";
 
-import { useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useEffect } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 
-export default function LoginPage() {
+function LoginContent() {
   const { user, loading, signInWithGoogle, authError } = useAuth();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const redirect = searchParams.get("redirect");
 
   useEffect(() => {
     if (!loading && user) {
-      router.replace("/matchs");
+      router.replace(redirect && redirect.startsWith("/") ? redirect : "/matchs");
     }
-  }, [user, loading, router]);
+  }, [user, loading, router, redirect]);
 
   if (loading) {
     return (
@@ -66,5 +68,17 @@ export default function LoginPage() {
         )}
       </div>
     </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={
+      <div className="flex min-h-screen items-center justify-center">
+        <div className="text-zinc-500">Chargement...</div>
+      </div>
+    }>
+      <LoginContent />
+    </Suspense>
   );
 }
