@@ -124,20 +124,53 @@ function LiguesPageContent() {
           </p>
         ) : (
           <div className="space-y-2">
-            {leagues.map((league) => (
-              <a
-                key={league.id}
-                href={`/classement?ligue=${league.id}`}
-                className="block rounded-xl border border-zinc-200 bg-white p-4 transition hover:border-blue-300 hover:bg-blue-50/50"
-              >
-                <span className="font-medium">{league.name}</span>
-                {league.creatorName && (
-                  <span className="ml-2 text-sm text-zinc-500">
-                    (créée par {league.creatorName})
-                  </span>
-                )}
-              </a>
-            ))}
+            {leagues.map((league) => {
+              const inviteUrl =
+                typeof window !== "undefined"
+                  ? `${window.location.origin}/rejoindre?code=${league.inviteCode}`
+                  : "";
+              return (
+                <div
+                  key={league.id}
+                  className="flex items-center gap-3 rounded-xl border border-zinc-200 bg-white p-4 transition hover:border-blue-300 hover:bg-blue-50/50"
+                >
+                  <a
+                    href={`/classement?ligue=${league.id}`}
+                    className="flex-1 min-w-0"
+                  >
+                    <span className="font-medium">{league.name}</span>
+                    {league.creatorName && (
+                      <span className="ml-2 text-sm text-zinc-500">
+                        (créée par {league.creatorName})
+                      </span>
+                    )}
+                  </a>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      if (inviteUrl) {
+                        navigator.clipboard.writeText(inviteUrl);
+                        const btn = e.currentTarget;
+                        const prev = btn.textContent;
+                        btn.textContent = "Copié !";
+                        btn.classList.add("bg-green-600");
+                        btn.classList.remove("bg-blue-600");
+                        setTimeout(() => {
+                          btn.textContent = prev;
+                          btn.classList.remove("bg-green-600");
+                          btn.classList.add("bg-blue-600");
+                        }, 1500);
+                      }
+                    }}
+                    title="Copier le lien d'invitation"
+                    className="shrink-0 rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700"
+                  >
+                    Lien d&apos;invitation
+                  </button>
+                </div>
+              );
+            })}
           </div>
         )}
       </main>
