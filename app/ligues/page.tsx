@@ -14,6 +14,7 @@ function LiguesPageContent() {
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState("");
   const [createdLeague, setCreatedLeague] = useState<(League & { creatorName?: string }) | null>(null);
+  const [copiedLeagueId, setCopiedLeagueId] = useState<string | null>(null);
 
   useEffect(() => {
     if (user) {
@@ -151,22 +152,39 @@ function LiguesPageContent() {
                       e.preventDefault();
                       if (inviteUrl) {
                         navigator.clipboard.writeText(inviteUrl);
-                        const btn = e.currentTarget;
-                        const prev = btn.textContent;
-                        btn.textContent = "Copié !";
-                        btn.classList.add("bg-green-600");
-                        btn.classList.remove("bg-blue-600");
-                        setTimeout(() => {
-                          btn.textContent = prev;
-                          btn.classList.remove("bg-green-600");
-                          btn.classList.add("bg-blue-600");
-                        }, 1500);
+                        setCopiedLeagueId(league.id);
+                        setTimeout(() => setCopiedLeagueId(null), 1500);
                       }
                     }}
                     title="Copier le lien d'invitation"
-                    className="shrink-0 rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700"
+                    className={`shrink-0 flex items-center justify-center rounded-lg p-2 text-white transition-colors ${
+                      copiedLeagueId === league.id
+                        ? "bg-green-600"
+                        : "bg-blue-600 hover:bg-blue-700"
+                    }`}
                   >
-                    Lien d&apos;invitation
+                    {copiedLeagueId === league.id ? (
+                      <span className="text-sm font-medium">Copié !</span>
+                    ) : (
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      width="20"
+                      height="20"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      aria-hidden
+                    >
+                      <circle cx="18" cy="5" r="3" />
+                      <circle cx="6" cy="12" r="3" />
+                      <circle cx="18" cy="19" r="3" />
+                      <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
+                      <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
+                    </svg>
+                    )}
                   </button>
                 </div>
               );

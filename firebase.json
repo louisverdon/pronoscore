@@ -33,6 +33,14 @@
         "destination": "/pronostics.html"
       },
       {
+        "source": "/ligues",
+        "destination": "/ligues.html"
+      },
+      {
+        "source": "/rejoindre",
+        "destination": "/rejoindre.html"
+      },
+      {
         "source": "/login",
         "destination": "/login.html"
       },
