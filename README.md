@@ -22,7 +22,35 @@ cd functions && npm install && cd ..
 1. Créez un projet sur [Firebase Console](https://console.firebase.google.com/)
 2. Activez **Authentication** → fournisseur **Google**
 3. Créez une base **Firestore**
-4. Copiez `.env.example` vers `.env.local` et remplissez les variables :
+4. Copiez `.env.example` vers `.env.local` et remplissez les variables selon l’environnement cible (voir section Environnements ci-dessous)
+
+## Environnements (dev vs prod)
+
+Le projet utilise deux projets Firebase distincts, configurés dans `.firebaserc` :
+
+| Alias      | Projet Firebase   | Usage                    |
+|------------|-------------------|--------------------------|
+| `production` | pronoscore-e143b | Production (utilisateurs réels) |
+| `dev`       | pronoscore-dev   | Développement, tests     |
+
+### Sélectionner l’environnement actif
+
+```bash
+# Travailler sur la prod
+firebase use production
+
+# Travailler sur le dev
+firebase use dev
+```
+
+### Variables d’environnement par projet
+
+L’app Next.js se connecte au projet Firebase défini dans `.env.local`. Chaque environnement doit avoir sa propre configuration.
+
+Créez `.env.local` avec les variables **NEXT_PUBLIC_FIREBASE_*** correspondant au projet que vous ciblez :
+
+- **Production** (`pronoscore-e143b`) : récupérez les valeurs dans [Firebase Console](https://console.firebase.google.com/project/pronoscore-e143b/settings/general)
+- **Dev** (`pronoscore-dev`) : récupérez les valeurs dans [Firebase Console](https://console.firebase.google.com/project/pronoscore-dev/settings/general)
 
 ```
 NEXT_PUBLIC_FIREBASE_API_KEY=...
@@ -33,104 +61,65 @@ NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=...
 NEXT_PUBLIC_FIREBASE_APP_ID=...
 ```
 
-### 3. Clé API football-data.org
+> **Important :** `NEXT_PUBLIC_FIREBASE_PROJECT_ID` doit correspondre au projet actif. Quand vous basculez de prod vers dev (ou l’inverse), mettez à jour `.env.local` puis redémarrez `npm run dev`.
 
-1. Créez un compte sur [football-data.org](https://www.football-data.org/)
-2. Récupérez votre token API
-3. Pour les Cloud Functions, configurez la variable :
+### Clé API football-data.org (Cloud Functions)
 
-```bash
-firebase functions:config:set football.api_key="VOTRE_CLE_API"
-```
-
-Ou utilisez les secrets Firebase (recommandé) :
+Les Cloud Functions utilisent `FOOTBALL_API_KEY` pour synchroniser les matchs Ligue 1. Configurez ce secret **pour chaque projet** où vous déployez les functions.
 
 ```bash
+firebase use dev  # ou production
 firebase functions:secrets:set FOOTBALL_API_KEY
 ```
 
-Puis dans `functions/src/index.ts`, remplacez `process.env.FOOTBALL_API_KEY` par l’accès au secret si nécessaire.
+Sans cette clé, la sync automatique est ignorée. En revanche, `addTestMatches` fonctionne sans clé API (matchs fictifs).
 
-### 4. Déploiement Firestore Rules
+### Premier sync des matchs
 
-```bash
-firebase deploy --only firestore
-```
+Après un déploiement, Firestore est vide. Deux options :
 
-### 5. Premier sync des matchs
-
-Les Cloud Functions sync les matchs toutes les 3 h. Pour un premier sync immédiat, déployez les functions puis appelez :
+**Option A — Matchs de test (sans clé API)**
 
 ```bash
+firebase use dev  # ou production
 # Après déploiement des functions
-curl -X POST https://REGION-PROJECT_ID.cloudfunctions.net/syncMatchesManual
+curl -X POST https://us-central1-pronoscore-dev.cloudfunctions.net/addTestMatches
 ```
 
-## Développement
+Pour la prod, remplacez `pronoscore-dev` par `pronoscore-e143b` dans l’URL.
 
-### 1. Variables d'environnement
-
-- **App** : `.env.local` avec `NEXT_PUBLIC_USE_EMULATORS=true` pour Auth/Firestore.
-- **Functions** (optionnel, pour sync matchs réels) : `functions/.env` avec `FOOTBALL_API_KEY=...`.
-
-### 2. Démarrer les émulateurs
+**Option B — Vrais matchs Ligue 1 (FOOTBALL_API_KEY requise)**
 
 ```bash
-firebase emulators:start
+curl -X POST https://us-central1-pronoscore-dev.cloudfunctions.net/syncMatchesManual
 ```
 
-L'UI des émulateurs : [http://localhost:4000](http://localhost:4000).
+La sync planifiée (`syncMatches`) s’exécute toutes les minutes. Un sync manuel permet de remplir la base immédiatement.
 
-### 3. Initialiser les premiers matchs dans l'émulateur
-
-Avec les émulateurs actifs, deux possibilités :
-
-#### Option A : Matchs fictifs (recommandé, pas de clé API)
-
-5 matchs de test via `addTestMatches` :
-
-```powershell
-# PowerShell
-Invoke-WebRequest -Method POST -UseBasicParsing -Uri "http://127.0.0.1:5001/pronoscore-e143b/us-central1/addTestMatches"
-```
-
-```bash
-# Bash
-curl -X POST http://127.0.0.1:5001/pronoscore-e143b/us-central1/addTestMatches
-```
-
-#### Option B : Vrais matchs Ligue 1 (clé football-data.org requise)
-
-1. Créez `functions/.env` avec `FOOTBALL_API_KEY=votre_cle`.
-2. Redémarrez les émulateurs.
-3. Appelez `syncMatchesManual` :
-
-```powershell
-Invoke-WebRequest -Method POST -UseBasicParsing -Uri "http://127.0.0.1:5001/pronoscore-e143b/us-central1/syncMatchesManual"
-```
-
-```bash
-curl -X POST http://127.0.0.1:5001/pronoscore-e143b/us-central1/syncMatchesManual
-```
-
-> L'émulateur affiche l'URL exacte au démarrage si la région diffère.
-
-### 4. Lancer l'app
+## Développement local
 
 ```bash
 npm run dev
 ```
 
-Ouvrez [http://localhost:3000](http://localhost:3000).
+Ouvrez [http://localhost:3000](http://localhost:3000). L’app se connecte au projet configuré dans `.env.local`.
 
-## Build & Déploiement
+## Build & déploiement
 
 ```bash
 npm run build
+firebase use production  # ou dev
 firebase deploy
 ```
 
 Le build Next.js génère le dossier `out/`, servi par Firebase Hosting.
+
+**Workflow typique :**
+
+1. `firebase use dev` — basculer sur l’environnement de dev
+2. Mettre à jour `.env.local` avec les credentials du projet dev
+3. `firebase deploy` — déployer Hosting + Firestore Rules + Functions sur pronoscore-dev
+4. Appeler `addTestMatches` ou `syncMatchesManual` pour peupler les matchs
 
 ## Pages
 
@@ -152,24 +141,21 @@ Le build Next.js génère le dossier `out/`, servi par Firebase Hosting.
 
 ## Mode test — Matchs fictifs
 
-Pour tester le calcul des scores sans attendre de vrais matchs Ligue 1, vous pouvez utiliser des matchs fictifs entre « Equipe 1 » et « Equipe 2 », etc.
-
-### Prérequis
-
-- Firebase Functions déployées ou émulateur actif
-- URL de base : production = `https://REGION-PROJECT_ID.cloudfunctions.net`, émulateur = `http://localhost:5001/PROJECT_ID/REGION`
+Pour tester le calcul des scores sans attendre de vrais matchs Ligue 1, utilisez des matchs fictifs via les endpoints déployés.
 
 ### 1. Ajouter 5 matchs de test
 
 ```bash
-# Bash / Git Bash
-curl -X POST https://REGION-PROJECT_ID.cloudfunctions.net/addTestMatches
+# Dev
+curl -X POST https://us-central1-pronoscore-dev.cloudfunctions.net/addTestMatches
 ```
 
 ```powershell
 # PowerShell (Windows)
-Invoke-WebRequest -Method POST -UseBasicParsing -Uri "https://REGION-PROJECT_ID.cloudfunctions.net/addTestMatches"
+Invoke-WebRequest -Method POST -UseBasicParsing -Uri "https://us-central1-pronoscore-dev.cloudfunctions.net/addTestMatches"
 ```
+
+Pour la prod, remplacez `pronoscore-dev` par `pronoscore-e143b`. Adaptez la région si nécessaire (ex. `europe-west1`).
 
 Cela crée 5 matchs avec les IDs `test-1` à `test-5` :
 
@@ -188,24 +174,24 @@ Ils apparaissent sur la page **/matchs** et les utilisateurs peuvent pronostique
 ```bash
 # Bash / Git Bash
 # Passer un match en cours
-curl -X POST https://REGION-PROJECT_ID.cloudfunctions.net/updateTestMatch \
+curl -X POST https://us-central1-pronoscore-dev.cloudfunctions.net/updateTestMatch \
   -H "Content-Type: application/json" \
   -d '{"matchId": "test-1", "status": "IN_PLAY"}'
 
 # Terminer un match avec un score
-curl -X POST https://REGION-PROJECT_ID.cloudfunctions.net/updateTestMatch \
+curl -X POST https://us-central1-pronoscore-dev.cloudfunctions.net/updateTestMatch \
   -H "Content-Type: application/json" \
   -d '{"matchId": "test-1", "status": "FINISHED", "homeScore": 2, "awayScore": 1}'
 
 # Modifier uniquement le score (match déjà terminé)
-curl -X POST https://REGION-PROJECT_ID.cloudfunctions.net/updateTestMatch \
+curl -X POST https://us-central1-pronoscore-dev.cloudfunctions.net/updateTestMatch \
   -H "Content-Type: application/json" \
   -d '{"matchId": "test-1", "homeScore": 3, "awayScore": 0}'
 ```
 
 ```powershell
 # PowerShell (Windows)
-Invoke-WebRequest -Method POST -UseBasicParsing -Uri "https://REGION-PROJECT_ID.cloudfunctions.net/updateTestMatch" -ContentType "application/json" -Body '{"matchId": "test-1", "status": "FINISHED", "homeScore": 2, "awayScore": 1}'
+Invoke-WebRequest -Method POST -UseBasicParsing -Uri "https://us-central1-pronoscore-dev.cloudfunctions.net/updateTestMatch" -ContentType "application/json" -Body '{"matchId": "test-1", "status": "FINISHED", "homeScore": 2, "awayScore": 1}'
 ```
 
 Paramètres possibles (tous optionnels sauf `matchId`) :
@@ -220,13 +206,11 @@ Paramètres possibles (tous optionnels sauf `matchId`) :
 Après avoir terminé un match, le calcul des points est automatique toutes les 30 minutes. Pour l’exécuter immédiatement :
 
 ```bash
-# Bash / Git Bash
-curl -X POST https://REGION-PROJECT_ID.cloudfunctions.net/calculateScoresManual
+curl -X POST https://us-central1-pronoscore-dev.cloudfunctions.net/calculateScoresManual
 ```
 
 ```powershell
-# PowerShell (Windows)
-Invoke-WebRequest -Method POST -UseBasicParsing -Uri "https://REGION-PROJECT_ID.cloudfunctions.net/calculateScoresManual"
+Invoke-WebRequest -Method POST -UseBasicParsing -Uri "https://us-central1-pronoscore-dev.cloudfunctions.net/calculateScoresManual"
 ```
 
 ### Workflow de test complet
@@ -236,4 +220,3 @@ Invoke-WebRequest -Method POST -UseBasicParsing -Uri "https://REGION-PROJECT_ID.
 3. `updateTestMatch` avec `status: "FINISHED"` et scores pour clôturer un match
 4. `calculateScoresManual` — mettre à jour les points
 5. Vérifier le classement sur **/classement**
-

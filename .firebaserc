@@ -1,7 +1,8 @@
 {
   "projects": {
-    "prono": "pronoscore-e143b",
-    "default": "pronoscore-e143b"
+    "default": "pronoscore-e143b",
+    "production": "pronoscore-e143b",
+    "dev": "pronoscore-dev"
   },
   "targets": {},
   "etags": {}

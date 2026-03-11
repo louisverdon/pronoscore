@@ -3,7 +3,8 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
 import {
   User as FirebaseUser,
-  signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
   GoogleAuthProvider,
   signOut as firebaseSignOut,
   onAuthStateChanged,
@@ -73,6 +74,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => clearTimeout(timeout);
   }, []);
 
+  // Gérer le retour après signInWithRedirect (évite l'erreur COOP avec signInWithPopup)
+  useEffect(() => {
+    getRedirectResult(auth).catch((err) => {
+      console.error("getRedirectResult:", err);
+      setAuthError(formatAuthError(err));
+    });
+  }, []);
+
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (fbUser) => {
       setFirebaseUser(fbUser);
@@ -132,8 +141,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const provider = new GoogleAuthProvider();
     setAuthError(null);
     try {
-      await signInWithPopup(auth, provider);
-      // onAuthStateChanged se charge du reste (mise à jour de user).
+      await signInWithRedirect(auth, provider);
+      // Redirection vers Google ; au retour, getRedirectResult + onAuthStateChanged feront le reste.
     } catch (err: unknown) {
       const msg = formatAuthError(err);
       console.error("signInWithGoogle:", err);
