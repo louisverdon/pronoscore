@@ -1,5 +1,6 @@
 import {
   collection,
+  deleteDoc,
   doc,
   getDoc,
   getDocs,
@@ -125,6 +126,12 @@ export async function getUserLeagues(userId: string): Promise<(League & { creato
       new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
   );
   return leagues;
+}
+
+/** Quitte une ligue (retire l'utilisateur de leagueMembers) */
+export async function leaveLeague(leagueId: string, userId: string): Promise<void> {
+  const memberId = `${leagueId}_${userId}`;
+  await deleteDoc(doc(db, "leagueMembers", memberId));
 }
 
 /** Liste les userId membres d'une ligue */
