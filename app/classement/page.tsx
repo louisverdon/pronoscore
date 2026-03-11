@@ -1,6 +1,7 @@
 "use client";
 
 import { Suspense, useEffect, useState } from "react";
+import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { getRanking } from "@/lib/ranking";
@@ -16,24 +17,29 @@ function ClassementContent() {
   const ligueParam = searchParams.get("ligue");
 
   const [leagues, setLeagues] = useState<(League & { creatorName?: string })[]>([]);
+  const [loadingLeagues, setLoadingLeagues] = useState(true);
   const [selectedLeagueId, setSelectedLeagueId] = useState<string | null>(null);
   const [ranking, setRanking] = useState<RankingEntry[]>([]);
   const [loadingRanking, setLoadingRanking] = useState(true);
 
   useEffect(() => {
     if (!user) return;
+    setLoadingLeagues(true);
     getUserLeagues(user.uid).then((list) => {
       setLeagues(list);
       if (ligueParam && list.some((l) => l.id === ligueParam)) {
         setSelectedLeagueId(ligueParam);
       } else if (list.length > 0) {
         setSelectedLeagueId((prev) => (prev && list.some((l) => l.id === prev) ? prev : list[0].id));
+      } else {
+        setSelectedLeagueId(null);
       }
+      setLoadingLeagues(false);
     });
   }, [user, ligueParam]);
 
   useEffect(() => {
-    if (user) {
+    if (user && selectedLeagueId) {
       setLoadingRanking(true);
       getRanking(selectedLeagueId).then((r) => {
         setRanking(r);
@@ -43,8 +49,11 @@ function ClassementContent() {
         getRanking(selectedLeagueId).then(setRanking);
       }, 60_000);
       return () => clearInterval(interval);
+    } else if (user && !loadingLeagues && leagues.length === 0) {
+      setLoadingRanking(false);
+      setRanking([]);
     }
-  }, [user, selectedLeagueId]);
+  }, [user, selectedLeagueId, loadingLeagues, leagues.length]);
 
   return (
     <div className="min-h-screen bg-zinc-50">
@@ -66,7 +75,30 @@ function ClassementContent() {
             </select>
           )}
         </div>
-        {loadingRanking ? (
+        {loadingLeagues ? (
+          <div className="text-zinc-500">Chargement...</div>
+        ) : leagues.length === 0 ? (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 p-6 text-center">
+            <p className="mb-4 text-zinc-700">
+              Vous n&apos;êtes membre d&apos;aucune ligue. Rejoignez une ligue ou
+              créez-en une pour voir le classement.
+            </p>
+            <div className="flex flex-wrap justify-center gap-3">
+              <Link
+                href="/ligues"
+                className="rounded-lg bg-blue-600 px-4 py-2 font-medium text-white hover:bg-blue-700"
+              >
+                Créer une ligue
+              </Link>
+              <Link
+                href="/rejoindre"
+                className="rounded-lg border border-zinc-300 bg-white px-4 py-2 font-medium text-zinc-700 hover:bg-zinc-50"
+              >
+                Rejoindre une ligue
+              </Link>
+            </div>
+          </div>
+        ) : loadingRanking ? (
           <div className="text-zinc-500">Chargement...</div>
         ) : ranking.length === 0 ? (
           <p className="text-zinc-600">
