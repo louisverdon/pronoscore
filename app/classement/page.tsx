@@ -49,11 +49,11 @@ function ClassementContent() {
         getRanking(selectedLeagueId).then(setRanking);
       }, 60_000);
       return () => clearInterval(interval);
-    } else if (user && !loadingLeagues && leagues.length === 0) {
+    } else if (user && !selectedLeagueId) {
       setLoadingRanking(false);
       setRanking([]);
     }
-  }, [user, selectedLeagueId, loadingLeagues, leagues.length]);
+  }, [user, selectedLeagueId]);
 
   return (
     <div className="min-h-screen bg-zinc-50">
