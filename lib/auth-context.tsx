@@ -3,8 +3,7 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
 import {
   User as FirebaseUser,
-  signInWithRedirect,
-  getRedirectResult,
+  signInWithPopup,
   GoogleAuthProvider,
   signOut as firebaseSignOut,
   onAuthStateChanged,
@@ -47,7 +46,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return "Compte utilisateur désactivé (auth/user-disabled).";
       case "auth/too-many-requests":
         return "Trop de tentatives. Réessayez plus tard (auth/too-many-requests).";
+      case "auth/popup-blocked":
+        return "La fenêtre de connexion a été bloquée. Autorisez les popups ou réessayez.";
+      case "auth/cancelled-popup-request":
+        return "Connexion annulée.";
       default:
+        // "missing initial state" (storage-partitioned, ex: navigateur intégré Messenger/Instagram)
+        if (
+          e?.message &&
+          String(e.message).toLowerCase().includes("missing initial state")
+        ) {
+          return "Ouvrez ce lien dans Safari ou Chrome (pas dans Messenger/Instagram) pour vous connecter.";
+        }
         return e?.message ? String(e.message) : "Erreur de connexion.";
     }
   };
@@ -72,14 +82,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const timeout = setTimeout(() => setLoading(false), 3000);
     return () => clearTimeout(timeout);
-  }, []);
-
-  // Gérer le retour après signInWithRedirect (évite l'erreur COOP avec signInWithPopup)
-  useEffect(() => {
-    getRedirectResult(auth).catch((err) => {
-      console.error("getRedirectResult:", err);
-      setAuthError(formatAuthError(err));
-    });
   }, []);
 
   useEffect(() => {
@@ -141,8 +143,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const provider = new GoogleAuthProvider();
     setAuthError(null);
     try {
-      await signInWithRedirect(auth, provider);
-      // Redirection vers Google ; au retour, getRedirectResult + onAuthStateChanged feront le reste.
+      await signInWithPopup(auth, provider);
     } catch (err: unknown) {
       const msg = formatAuthError(err);
       console.error("signInWithGoogle:", err);
