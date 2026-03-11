@@ -16,6 +16,7 @@ function ClassementContent() {
   const ligueParam = searchParams.get("ligue");
 
   const [leagues, setLeagues] = useState<(League & { creatorName?: string })[]>([]);
+  const [leaguesLoaded, setLeaguesLoaded] = useState(false);
   const [selectedLeagueId, setSelectedLeagueId] = useState<string | null>(null);
   const [ranking, setRanking] = useState<RankingEntry[]>([]);
   const [loadingRanking, setLoadingRanking] = useState(true);
@@ -24,6 +25,7 @@ function ClassementContent() {
     if (!user) return;
     getUserLeagues(user.uid).then((list) => {
       setLeagues(list);
+      setLeaguesLoaded(true);
       if (ligueParam && list.some((l) => l.id === ligueParam)) {
         setSelectedLeagueId(ligueParam);
       } else if (list.length > 0) {
@@ -33,18 +35,22 @@ function ClassementContent() {
   }, [user, ligueParam]);
 
   useEffect(() => {
-    if (user) {
-      setLoadingRanking(true);
-      getRanking(selectedLeagueId).then((r) => {
-        setRanking(r);
-        setLoadingRanking(false);
-      });
-      const interval = setInterval(() => {
-        getRanking(selectedLeagueId).then(setRanking);
-      }, 60_000);
-      return () => clearInterval(interval);
+    if (!user || !leaguesLoaded) return;
+    if (!selectedLeagueId) {
+      setRanking([]);
+      setLoadingRanking(false);
+      return;
     }
-  }, [user, selectedLeagueId]);
+    setLoadingRanking(true);
+    getRanking(selectedLeagueId).then((r) => {
+      setRanking(r);
+      setLoadingRanking(false);
+    });
+    const interval = setInterval(() => {
+      getRanking(selectedLeagueId).then(setRanking);
+    }, 60_000);
+    return () => clearInterval(interval);
+  }, [user, selectedLeagueId, leaguesLoaded]);
 
   return (
     <div className="min-h-screen bg-zinc-50">
