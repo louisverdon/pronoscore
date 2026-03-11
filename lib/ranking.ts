@@ -7,16 +7,14 @@ import { getLeagueMemberIds } from "./leagues";
 import type { RankingEntry, User } from "./types";
 
 /**
- * Retourne le classement. Si leagueId est fourni, uniquement les membres de cette ligue.
- * Sinon, classement global (tous les utilisateurs).
+ * Retourne le classement des membres de la ligue donnée.
+ * Un leagueId est requis — sans ligue, retourne un tableau vide.
  */
 export async function getRanking(leagueId?: string | null): Promise<RankingEntry[]> {
-  let allowedUserIds: Set<string> | null = null;
-  if (leagueId) {
-    const ids = await getLeagueMemberIds(leagueId);
-    allowedUserIds = new Set(ids);
-    if (allowedUserIds.size === 0) return [];
-  }
+  if (!leagueId) return [];
+  const ids = await getLeagueMemberIds(leagueId);
+  const allowedUserIds = new Set(ids);
+  if (allowedUserIds.size === 0) return [];
 
   const [predictionsSnap, ongoingMatches] = await Promise.all([
     getDocs(collection(db, "predictions")),
@@ -33,7 +31,7 @@ export async function getRanking(leagueId?: string | null): Promise<RankingEntry
     const data = predDoc.data();
     const userId = data.userId;
     if (!userId) continue;
-    if (allowedUserIds && !allowedUserIds.has(userId)) continue;
+    if (!allowedUserIds.has(userId)) continue;
     if (!pointsByUser[userId]) {
       pointsByUser[userId] = { totalPoints: 0, exactScores: 0 };
     }
