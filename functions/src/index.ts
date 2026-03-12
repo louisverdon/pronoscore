@@ -487,3 +487,27 @@ export const onMatchCreated = functions.firestore
     await processFinishedMatch(db, matchId, data);
     return null;
   });
+
+/**
+ * Quand un membre quitte une ligue, supprime la ligue si elle n'a plus aucun membre.
+ */
+export const onLeagueMemberDeleted = functions.firestore
+  .document("leagueMembers/{memberId}")
+  .onDelete(async (snap) => {
+    const data = snap.data();
+    const leagueId = data?.leagueId as string | undefined;
+    if (!leagueId) return null;
+
+    const db = admin.firestore();
+    const remaining = await db
+      .collection("leagueMembers")
+      .where("leagueId", "==", leagueId)
+      .limit(1)
+      .get();
+
+    if (remaining.empty) {
+      await db.collection("leagues").doc(leagueId).delete();
+      functions.logger.info("onLeagueMemberDeleted: ligue vide supprimée", { leagueId });
+    }
+    return null;
+  });

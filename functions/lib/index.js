@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.onMatchCreated = exports.onMatchFinished = exports.calculateScores = exports.calculateScoresManual = exports.updateTestMatch = exports.addTestMatches = exports.syncMatches = exports.syncMatchesManual = void 0;
+exports.onLeagueMemberDeleted = exports.onMatchCreated = exports.onMatchFinished = exports.calculateScores = exports.calculateScoresManual = exports.updateTestMatch = exports.addTestMatches = exports.syncMatches = exports.syncMatchesManual = void 0;
 const functions = require("firebase-functions");
 const admin = require("firebase-admin");
 admin.initializeApp();
@@ -420,6 +420,28 @@ exports.onMatchCreated = functions.firestore
     const db = admin.firestore();
     functions.logger.info("onMatchCreated (FINISHED) triggered", { matchId });
     await processFinishedMatch(db, matchId, data);
+    return null;
+});
+/**
+ * Quand un membre quitte une ligue, supprime la ligue si elle n'a plus aucun membre.
+ */
+exports.onLeagueMemberDeleted = functions.firestore
+    .document("leagueMembers/{memberId}")
+    .onDelete(async (snap) => {
+    const data = snap.data();
+    const leagueId = data?.leagueId;
+    if (!leagueId)
+        return null;
+    const db = admin.firestore();
+    const remaining = await db
+        .collection("leagueMembers")
+        .where("leagueId", "==", leagueId)
+        .limit(1)
+        .get();
+    if (remaining.empty) {
+        await db.collection("leagues").doc(leagueId).delete();
+        functions.logger.info("onLeagueMemberDeleted: ligue vide supprimée", { leagueId });
+    }
     return null;
 });
 //# sourceMappingURL=index.js.map
