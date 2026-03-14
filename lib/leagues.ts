@@ -143,3 +143,31 @@ export async function getLeagueMemberIds(leagueId: string): Promise<string[]> {
   const snap = await getDocs(q);
   return snap.docs.map((d) => d.data().userId as string);
 }
+
+/**
+ * Retourne tous les userId visibles par l'utilisateur :
+ * tous les membres partageant au moins une ligue avec lui (hors lui-même).
+ */
+export async function getLeagueVisibleUserIds(userId: string): Promise<string[]> {
+  const myMembershipsQ = query(
+    collection(db, "leagueMembers"),
+    where("userId", "==", userId)
+  );
+  const mySnap = await getDocs(myMembershipsQ);
+  const leagueIds = mySnap.docs.map((d) => d.data().leagueId as string);
+  if (leagueIds.length === 0) return [];
+
+  const visibleIds = new Set<string>();
+  for (const leagueId of leagueIds) {
+    const membersQ = query(
+      collection(db, "leagueMembers"),
+      where("leagueId", "==", leagueId)
+    );
+    const membersSnap = await getDocs(membersQ);
+    for (const d of membersSnap.docs) {
+      const uid = d.data().userId as string;
+      if (uid !== userId) visibleIds.add(uid);
+    }
+  }
+  return Array.from(visibleIds);
+}

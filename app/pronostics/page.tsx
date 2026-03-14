@@ -7,6 +7,8 @@ import { getUserPredictions } from "@/lib/predictions";
 import RequireAuth from "@/components/RequireAuth";
 import { getMatch } from "@/lib/matches";
 import { computePoints } from "@/lib/points";
+import { getLeagueVisibleUserIds } from "@/lib/leagues";
+import OtherUsersPredictionsModal from "@/components/OtherUsersPredictionsModal";
 import type { Prediction, Match } from "@/lib/types";
 import Nav from "@/components/Nav";
 
@@ -32,6 +34,8 @@ function MesPronosticsPageContent() {
   const [predictions, setPredictions] = useState<PredictionWithMatch[]>([]);
   const [loadingData, setLoadingData] = useState(true);
   const [expandedMatchdays, setExpandedMatchdays] = useState<Set<number>>(new Set());
+  const [visibleUserIds, setVisibleUserIds] = useState<string[]>([]);
+  const [selectedMatch, setSelectedMatch] = useState<Match | null>(null);
 
   const groupsByMatchday = useMemo(() => {
     const map = new Map<number, PredictionWithMatch[]>();
@@ -62,6 +66,12 @@ function MesPronosticsPageContent() {
       return next;
     });
   };
+
+  useEffect(() => {
+    if (user) {
+      getLeagueVisibleUserIds(user.uid).then(setVisibleUserIds);
+    }
+  }, [user]);
 
   useEffect(() => {
     if (user) {
@@ -201,12 +211,23 @@ function MesPronosticsPageContent() {
                               )}
                               {p.match.status !== "SCHEDULED" &&
                                 p.match.status !== "TIMED" && (
-                                  <Link
-                                    href={`/matchs/match?id=${p.matchId}`}
-                                    className="mt-2 inline-block text-sm text-blue-600 hover:underline"
-                                  >
-                                    Voir les pronostics
-                                  </Link>
+                                  <div className="mt-2 flex flex-wrap gap-3">
+                                    <Link
+                                      href={`/matchs/match?id=${p.matchId}`}
+                                      className="text-sm text-blue-600 hover:underline"
+                                    >
+                                      Voir tous les pronostics
+                                    </Link>
+                                    {visibleUserIds.length > 0 && (
+                                      <button
+                                        type="button"
+                                        onClick={() => setSelectedMatch(p.match!)}
+                                        className="text-sm text-indigo-600 hover:underline"
+                                      >
+                                        Pronostics de mes ligues
+                                      </button>
+                                    )}
+                                  </div>
                                 )}
                             </>
                           ) : (
@@ -224,6 +245,14 @@ function MesPronosticsPageContent() {
           </div>
         )}
       </main>
+
+      {selectedMatch && (
+        <OtherUsersPredictionsModal
+          match={selectedMatch}
+          visibleUserIds={visibleUserIds}
+          onClose={() => setSelectedMatch(null)}
+        />
+      )}
     </div>
   );
 }

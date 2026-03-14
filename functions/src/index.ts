@@ -30,34 +30,155 @@ interface FootballResponse {
 }
 
 /**
- * Vérifie si on doit récupérer les prochains matchs (7 jours) :
- * - Oui si la base est vide
- * - Oui si tous les matchs en base sont FINISHED
- * - Non sinon
+ * Détermine le mode de synchronisation selon l'état de la base :
+ * - "next_matchday" : base vide ou tous les matchs sont FINISHED/POSTPONED
+ * - "update_1min"   : au moins un match en cours (IN_PLAY, PAUSED, LIVE)
+ * - "update_5min"   : matchs en base mais aucun en cours
  */
-async function shouldFetchUpcomingMatches(
+type SyncMode = "next_matchday" | "update_1min" | "update_5min";
+
+const LIVE_STATUSES = ["IN_PLAY", "PAUSED", "LIVE"];
+const DONE_STATUSES = ["FINISHED", "POSTPONED"];
+
+/** Intervalles de throttling (en ms) par mode */
+const SYNC_INTERVALS: Record<SyncMode, number> = {
+  update_1min: 60 * 1000,
+  update_5min: 5 * 60 * 1000,
+  next_matchday: 30 * 60 * 1000,
+};
+
+async function determineSyncMode(
   db: admin.firestore.Firestore
-): Promise<boolean> {
+): Promise<SyncMode> {
   const snapshot = await db.collection("matches").get();
-  if (snapshot.empty) return true;
-  const allFinished = snapshot.docs.every(
-    (d) => (d.data().status as string) === "FINISHED"
-  );
-  return allFinished;
+  if (snapshot.empty) return "next_matchday";
+
+  const statuses = snapshot.docs.map((d) => d.data().status as string);
+
+  if (statuses.some((s) => LIVE_STATUSES.includes(s))) return "update_1min";
+  if (statuses.every((s) => DONE_STATUSES.includes(s))) return "next_matchday";
+  return "update_5min";
 }
 
 /**
- * Retourne l'URL pour récupérer les prochains matchs de la journée et des jours à venir.
- * Utilise dateFrom/dateTo pour couvrir aujourd'hui + 7 jours.
+ * Retourne true si assez de temps s'est écoulé depuis la dernière sync
+ * (ou si le mode a changé, pour réagir immédiatement).
  */
-function getMatchesUrlForUpcomingMatches(): string {
+async function shouldRunSync(
+  db: admin.firestore.Firestore,
+  mode: SyncMode
+): Promise<boolean> {
+  const stateDoc = await db.doc("config/syncState").get();
+  if (!stateDoc.exists) return true;
+
+  const data = stateDoc.data();
+  const lastMode = data?.lastMode as string | undefined;
+  const lastSyncAt = data?.lastSyncAt as admin.firestore.Timestamp | undefined;
+
+  if (!lastSyncAt) return true;
+  if (lastMode !== mode) return true;
+
+  return Date.now() - lastSyncAt.toMillis() >= SYNC_INTERVALS[mode];
+}
+
+async function recordSyncAt(
+  db: admin.firestore.Firestore,
+  mode: SyncMode
+): Promise<void> {
+  await db.doc("config/syncState").set(
+    { lastSyncAt: admin.firestore.FieldValue.serverTimestamp(), lastMode: mode },
+    { merge: true }
+  );
+}
+
+/**
+ * Récupère les matchs de la prochaine journée (matchday) non encore terminée.
+ * Cherche sur les 30 prochains jours et ne stocke que les matchs du premier matchday trouvé.
+ */
+async function fetchNextMatchday(db: admin.firestore.Firestore): Promise<number> {
   const today = new Date();
   const future = new Date(today);
-  future.setDate(future.getDate() + 7);
+  future.setDate(future.getDate() + 30);
   const dateFrom = today.toISOString().split("T")[0];
   const dateTo = future.toISOString().split("T")[0];
   const params = new URLSearchParams({ dateFrom, dateTo });
-  return `${FL1_MATCHES_URL}?${params.toString()}`;
+  const url = `${FL1_MATCHES_URL}?${params.toString()}`;
+
+  const res = await fetch(url, { headers: { "X-Auth-Token": FOOTBALL_API_KEY } });
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  const data: FootballResponse = await res.json();
+
+  const upcoming = data.matches.filter(
+    (m) => !DONE_STATUSES.includes(m.status) && m.matchday != null
+  );
+  if (upcoming.length === 0) {
+    console.log("Aucun match à venir dans les 30 prochains jours");
+    return 0;
+  }
+
+  const nextMatchday = Math.min(...upcoming.map((m) => m.matchday as number));
+  const toStore = data.matches.filter((m) => m.matchday === nextMatchday);
+
+  const batch = db.batch();
+  for (const m of toStore) {
+    const ref = db.collection("matches").doc(String(m.id));
+    batch.set(ref, toFirestoreMatch(m), { merge: true });
+  }
+  await batch.commit();
+  return toStore.length;
+}
+
+/**
+ * Met à jour les matchs de la journée en cours.
+ * Récupère le numéro de journée active depuis Firestore, puis interroge
+ * l'API avec ?matchday=X pour avoir tous les matchs de cette journée.
+ * Si aucun matchday n'est trouvé en base, repli sur ±3 jours autour d'aujourd'hui.
+ */
+async function fetchCurrentMatches(db: admin.firestore.Firestore): Promise<number> {
+  // Trouver le matchday actif (SCHEDULED, TIMED ou IN_PLAY) depuis Firestore
+  const snapshot = await db.collection("matches").get();
+  const activeMatchdays = snapshot.docs
+    .map((d) => d.data())
+    .filter((d) => !DONE_STATUSES.includes(d.status) && d.matchday != null)
+    .map((d) => d.matchday as number);
+
+  let url: string;
+  if (activeMatchdays.length > 0) {
+    const currentMatchday = Math.min(...activeMatchdays);
+    url = `${FL1_MATCHES_URL}?matchday=${currentMatchday}`;
+    console.log(`Récupération journée ${currentMatchday}`);
+  } else {
+    // Repli : fenêtre de ±3 jours autour d'aujourd'hui
+    const today = new Date();
+    const past = new Date(today);
+    past.setDate(past.getDate() - 3);
+    const future = new Date(today);
+    future.setDate(future.getDate() + 3);
+    const dateFrom = past.toISOString().split("T")[0];
+    const dateTo = future.toISOString().split("T")[0];
+    url = `${FL1_MATCHES_URL}?${new URLSearchParams({ dateFrom, dateTo }).toString()}`;
+    console.log(`Récupération par date (repli) : ${dateFrom} → ${dateTo}`);
+  }
+
+  const res = await fetch(url, { headers: { "X-Auth-Token": FOOTBALL_API_KEY } });
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  const data: FootballResponse = await res.json();
+
+  const batch = db.batch();
+  for (const m of data.matches) {
+    const ref = db.collection("matches").doc(String(m.id));
+    batch.set(ref, toFirestoreMatch(m), { merge: true });
+  }
+  await batch.commit();
+  return data.matches.length;
+}
+
+async function syncMatchesForMode(
+  db: admin.firestore.Firestore,
+  mode: SyncMode
+): Promise<number> {
+  if (mode === "next_matchday") return fetchNextMatchday(db);
+  return fetchCurrentMatches(db);
 }
 
 function toFirestoreMatch(m: FootballMatch) {
@@ -82,8 +203,7 @@ function toFirestoreMatch(m: FootballMatch) {
 }
 
 /**
- * HTTP endpoint to manually trigger match sync (for initial setup).
- * Requires Firebase Auth or can be restricted by App Check.
+ * HTTP endpoint to manually trigger match sync (bypasses throttle).
  */
 export const syncMatchesManual = functions.https.onRequest(async (req, res) => {
   if (req.method !== "POST") {
@@ -96,27 +216,10 @@ export const syncMatchesManual = functions.https.onRequest(async (req, res) => {
   }
   try {
     const db = admin.firestore();
-    if (!(await shouldFetchUpcomingMatches(db))) {
-      res.status(200).json({
-        synced: 0,
-        reason: "Base contains non-finished matches, skipping fetch",
-      });
-      return;
-    }
-    const matchesUrl = getMatchesUrlForUpcomingMatches();
-    const apiRes = await fetch(matchesUrl, {
-      headers: { "X-Auth-Token": FOOTBALL_API_KEY },
-    });
-    if (!apiRes.ok) throw new Error(`API error: ${apiRes.status}`);
-    const data: FootballResponse = await apiRes.json();
-    const batch = db.batch();
-    for (const m of data.matches) {
-      const fm = toFirestoreMatch(m);
-      const ref = db.collection("matches").doc(String(m.id));
-      batch.set(ref, fm, { merge: true });
-    }
-    await batch.commit();
-    res.status(200).json({ synced: data.matches.length });
+    const mode = await determineSyncMode(db);
+    const count = await syncMatchesForMode(db, mode);
+    await recordSyncAt(db, mode);
+    res.status(200).json({ synced: count, mode });
   } catch (e) {
     console.error(e);
     res.status(500).send(String(e));
@@ -124,7 +227,11 @@ export const syncMatchesManual = functions.https.onRequest(async (req, res) => {
 });
 
 /**
- * Sync Ligue 1 matches from football-data.org every 3 hours.
+ * Sync Ligue 1 matches — tourne toutes les minutes, mais le throttling interne
+ * adapte la fréquence réelle selon l'état de la base :
+ * - Base vide / tous terminés : récupère la prochaine journée (throttle 30 min)
+ * - Matchs en cours (IN_PLAY) : mise à jour toutes les minutes
+ * - Matchs planifiés (SCHEDULED/TIMED) : mise à jour toutes les 5 minutes
  */
 export const syncMatches = functions.pubsub
   .schedule("every 1 minutes")
@@ -135,28 +242,16 @@ export const syncMatches = functions.pubsub
     }
 
     const db = admin.firestore();
-    if (!(await shouldFetchUpcomingMatches(db))) {
-      console.log(
-        "Base contains non-finished matches, skipping upcoming matches fetch"
-      );
+    const mode = await determineSyncMode(db);
+
+    if (!(await shouldRunSync(db, mode))) {
+      console.log(`Mode: ${mode} — throttle actif, sync ignorée`);
       return null;
     }
-    const matchesUrl = getMatchesUrlForUpcomingMatches();
-    const res = await fetch(matchesUrl, {
-      headers: { "X-Auth-Token": FOOTBALL_API_KEY },
-    });
-    if (!res.ok) {
-      throw new Error(`Football API error: ${res.status}`);
-    }
-    const data: FootballResponse = await res.json();
-    const batch = db.batch();
-    for (const m of data.matches) {
-      const fm = toFirestoreMatch(m);
-      const ref = db.collection("matches").doc(String(m.id));
-      batch.set(ref, fm, { merge: true });
-    }
-    await batch.commit();
-    console.log(`Synced ${data.matches.length} matches`);
+
+    const count = await syncMatchesForMode(db, mode);
+    await recordSyncAt(db, mode);
+    console.log(`Mode: ${mode} — ${count} matchs synchronisés`);
     return null;
   });
 
