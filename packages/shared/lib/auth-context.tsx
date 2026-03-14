@@ -25,7 +25,15 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-export function AuthProvider({ children }: { children: React.ReactNode }) {
+interface AuthProviderProps {
+  children: React.ReactNode;
+  /** Override pour mobile (signInWithPopup n'existe pas sur React Native) */
+  signInWithGoogleOverride?: () => Promise<void>;
+  /** Appelé avant firebase signOut (ex: déconnexion Google native) */
+  signOutOverride?: () => Promise<void>;
+}
+
+export function AuthProvider({ children, signInWithGoogleOverride, signOutOverride }: AuthProviderProps) {
   const [user, setUser] = useState<User | null>(null);
   const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
   const [loading, setLoading] = useState(true);
@@ -136,14 +144,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const signInWithGoogle = async () => {
     if (!isFirebaseConfigured) {
       const msg =
-        "Firebase n'est pas configuré (.env.local). Renseigne NEXT_PUBLIC_FIREBASE_* puis relance le serveur.";
+        "Firebase n'est pas configuré (.env.local). Renseigne NEXT_PUBLIC_FIREBASE_* (web) ou EXPO_PUBLIC_FIREBASE_* (mobile).";
       setAuthError(msg);
       return;
     }
-    const provider = new GoogleAuthProvider();
     setAuthError(null);
     try {
-      await signInWithPopup(auth, provider);
+      if (signInWithGoogleOverride) {
+        await signInWithGoogleOverride();
+      } else {
+        const provider = new GoogleAuthProvider();
+        await signInWithPopup(auth, provider);
+      }
     } catch (err: unknown) {
       const msg = formatAuthError(err);
       console.error("signInWithGoogle:", err);
@@ -152,6 +164,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const signOut = async () => {
+    if (signOutOverride) await signOutOverride();
     await firebaseSignOut(auth);
     setUser(null);
     setFirebaseUser(null);

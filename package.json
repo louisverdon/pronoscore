@@ -1,12 +1,15 @@
 {
   "name": "pronoscore-monorepo",
   "private": true,
+  "packageManager": "npm@10.9.0",
   "workspaces": [
     "apps/*",
     "packages/*"
   ],
   "scripts": {
     "dev": "turbo dev",
+    "dev:web": "npm run dev --workspace=apps/web",
+    "dev:mobile": "npm run start --workspace=apps/mobile",
     "build": "turbo build",
     "build:dev": "turbo build:dev",
     "build:prod": "turbo build:prod",

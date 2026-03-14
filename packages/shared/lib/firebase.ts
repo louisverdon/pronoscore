@@ -2,22 +2,25 @@ import { initializeApp, getApps, FirebaseApp } from "firebase/app";
 import { getAuth, Auth, connectAuthEmulator } from "firebase/auth";
 import { getFirestore, Firestore, connectFirestoreEmulator } from "firebase/firestore";
 
-// Use env vars; fallbacks allow build to succeed without .env.local
+// Support both Next.js (NEXT_PUBLIC_*) and Expo (EXPO_PUBLIC_*) env vars
+const env = (key: string) =>
+  process.env[`NEXT_PUBLIC_${key}`] ?? process.env[`EXPO_PUBLIC_${key}`];
+
 const firebaseConfig = {
-  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY ?? "AIzaSyBuildTimePlaceholder0000000000000000000",
-  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN ?? "pronoscore.firebaseapp.com",
-  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID ?? "pronoscore",
-  storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET ?? "pronoscore.appspot.com",
-  messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID ?? "000000000000",
-  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID ?? "1:000000000000:web:0000000000000000000000",
+  apiKey: env("FIREBASE_API_KEY") ?? "AIzaSyBuildTimePlaceholder0000000000000000000",
+  authDomain: env("FIREBASE_AUTH_DOMAIN") ?? "pronoscore.firebaseapp.com",
+  projectId: env("FIREBASE_PROJECT_ID") ?? "pronoscore",
+  storageBucket: env("FIREBASE_STORAGE_BUCKET") ?? "pronoscore.appspot.com",
+  messagingSenderId: env("FIREBASE_MESSAGING_SENDER_ID") ?? "000000000000",
+  appId: env("FIREBASE_APP_ID") ?? "1:000000000000:web:0000000000000000000000",
 };
 
 export const isFirebaseConfigured =
-  !!process.env.NEXT_PUBLIC_FIREBASE_API_KEY &&
+  !!env("FIREBASE_API_KEY") &&
   !firebaseConfig.apiKey.startsWith("AIzaSyBuildTimePlaceholder") &&
-  !!process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN &&
-  !!process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID &&
-  !!process.env.NEXT_PUBLIC_FIREBASE_APP_ID;
+  !!env("FIREBASE_AUTH_DOMAIN") &&
+  !!env("FIREBASE_PROJECT_ID") &&
+  !!env("FIREBASE_APP_ID");
 
 let app: FirebaseApp;
 let auth: Auth;
@@ -28,7 +31,8 @@ if (getApps().length === 0) {
   auth = getAuth(app);
   db = getFirestore(app);
 
-  if (process.env.NEXT_PUBLIC_USE_EMULATORS === "true") {
+  const useEmulators = process.env.NEXT_PUBLIC_USE_EMULATORS === "true" || process.env.EXPO_PUBLIC_USE_EMULATORS === "true";
+  if (useEmulators) {
     connectFirestoreEmulator(db, "127.0.0.1", 8080);
     if (typeof window !== "undefined") {
       connectAuthEmulator(auth, "http://127.0.0.1:9099", { disableWarnings: true });
