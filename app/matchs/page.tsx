@@ -38,7 +38,7 @@ function MatchsPageContent() {
         ) : (
           <div className="space-y-4">
             {upcoming.map((m) => (
-              <MatchCard key={m.id} match={m} showPronosticsLink={false} />
+              <MatchCard key={m.id} match={m} />
             ))}
           </div>
         )}

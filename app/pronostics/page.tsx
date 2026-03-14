@@ -210,24 +210,15 @@ function MesPronosticsPageContent() {
                                 </div>
                               )}
                               {p.match.status !== "SCHEDULED" &&
-                                p.match.status !== "TIMED" && (
-                                  <div className="mt-2 flex flex-wrap gap-3">
-                                    <Link
-                                      href={`/matchs/match?id=${p.matchId}`}
-                                      className="text-sm text-blue-600 hover:underline"
-                                    >
-                                      Voir tous les pronostics
-                                    </Link>
-                                    {visibleUserIds.length > 0 && (
-                                      <button
-                                        type="button"
-                                        onClick={() => setSelectedMatch(p.match!)}
-                                        className="text-sm text-indigo-600 hover:underline"
-                                      >
-                                        Pronostics de mes ligues
-                                      </button>
-                                    )}
-                                  </div>
+                                p.match.status !== "TIMED" &&
+                                visibleUserIds.length > 0 && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setSelectedMatch(p.match!)}
+                                    className="mt-2 text-sm text-indigo-600 hover:underline"
+                                  >
+                                    Pronostics de mes ligues
+                                  </button>
                                 )}
                             </>
                           ) : (

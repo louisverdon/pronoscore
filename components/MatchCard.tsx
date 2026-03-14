@@ -1,20 +1,15 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import Link from "next/link";
 import type { Match } from "@/lib/types";
 import { getPrediction, savePrediction } from "@/lib/predictions";
 import { useAuth } from "@/lib/auth-context";
 
 interface MatchCardProps {
   match: Match;
-  showPronosticsLink?: boolean;
 }
 
-export default function MatchCard({
-  match,
-  showPronosticsLink = true,
-}: MatchCardProps) {
+export default function MatchCard({ match }: MatchCardProps) {
   const { user } = useAuth();
   const [homeScore, setHomeScore] = useState("");
   const [awayScore, setAwayScore] = useState("");
@@ -150,16 +145,6 @@ export default function MatchCard({
           )}
         </div>
       </div>
-      {showPronosticsLink && !canEdit && (
-        <div className="mt-3">
-          <Link
-            href={`/matchs/match?id=${match.id}`}
-            className="text-sm text-blue-600 hover:underline"
-          >
-            Voir les pronostics
-          </Link>
-        </div>
-      )}
     </div>
   );
 }
