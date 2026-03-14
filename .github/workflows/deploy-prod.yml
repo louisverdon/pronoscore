@@ -23,6 +23,10 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Install functions dependencies
+        run: npm ci
+        working-directory: functions
+
       - name: Create .env.production from secrets
         run: |
           echo "NEXT_PUBLIC_FIREBASE_API_KEY=${{ secrets.PROD_FIREBASE_API_KEY }}" >> .env.production
