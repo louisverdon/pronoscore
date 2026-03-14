@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 import { useRouter, usePathname } from "next/navigation";
-import { useAuth } from "@/lib/auth-context";
+import { useAuth } from "@pronoscore/shared";
 
 /**
  * Wrapper pour les pages protégées. Redirige vers /login si l'utilisateur n'est pas connecté.

@@ -2,14 +2,16 @@
 
 import { useEffect, useState, useMemo } from "react";
 import Link from "next/link";
-import { useAuth } from "@/lib/auth-context";
-import { getUserPredictions } from "@/lib/predictions";
+import {
+  useAuth,
+  getUserPredictions,
+  getMatch,
+  computePoints,
+  getLeagueVisibleUserIds,
+} from "@pronoscore/shared";
+import type { Prediction, Match } from "@pronoscore/shared";
 import RequireAuth from "@/components/RequireAuth";
-import { getMatch } from "@/lib/matches";
-import { computePoints } from "@/lib/points";
-import { getLeagueVisibleUserIds } from "@/lib/leagues";
 import OtherUsersPredictionsModal from "@/components/OtherUsersPredictionsModal";
-import type { Prediction, Match } from "@/lib/types";
 import Nav from "@/components/Nav";
 
 /** Group key: matchday number, 0 = sans journée (matchs sans matchday). */

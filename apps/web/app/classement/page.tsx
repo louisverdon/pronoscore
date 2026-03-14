@@ -2,10 +2,13 @@
 
 import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { useAuth } from "@/lib/auth-context";
-import { getRanking } from "@/lib/ranking";
-import { getUserLeagues, leaveLeague } from "@/lib/leagues";
-import type { RankingEntry, League } from "@/lib/types";
+import {
+  useAuth,
+  getRanking,
+  getUserLeagues,
+  leaveLeague,
+} from "@pronoscore/shared";
+import type { RankingEntry, League } from "@pronoscore/shared";
 import Nav from "@/components/Nav";
 import RequireAuth from "@/components/RequireAuth";
 import Avatar from "@/components/Avatar";

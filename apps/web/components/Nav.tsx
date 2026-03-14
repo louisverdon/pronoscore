@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useAuth } from "@/lib/auth-context";
+import { useAuth } from "@pronoscore/shared";
 import Avatar from "@/components/Avatar";
 
 export default function Nav() {

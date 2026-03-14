@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
-import { AuthProvider } from "@/lib/auth-context";
+import { AuthProvider } from "@pronoscore/shared";
 import UsernameOnboarding from "@/components/UsernameOnboarding";
 import "./globals.css";
 

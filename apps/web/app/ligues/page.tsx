@@ -1,9 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useAuth } from "@/lib/auth-context";
-import { createLeague, getUserLeagues, leaveLeague } from "@/lib/leagues";
-import type { League } from "@/lib/types";
+import {
+  useAuth,
+  createLeague,
+  getUserLeagues,
+  leaveLeague,
+} from "@pronoscore/shared";
+import type { League } from "@pronoscore/shared";
 import Nav from "@/components/Nav";
 import RequireAuth from "@/components/RequireAuth";
 

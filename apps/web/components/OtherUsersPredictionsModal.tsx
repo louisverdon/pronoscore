@@ -2,10 +2,13 @@
 
 import { useEffect, useState } from "react";
 import Avatar from "./Avatar";
-import { computePoints } from "@/lib/points";
-import { getMatchPredictions } from "@/lib/predictions";
-import { getUser, getDisplayName } from "@/lib/user";
-import type { Match, Prediction, User } from "@/lib/types";
+import {
+  computePoints,
+  getMatchPredictions,
+  getUser,
+  getDisplayName,
+} from "@pronoscore/shared";
+import type { Match, Prediction, User } from "@pronoscore/shared";
 
 interface UserPredictionEntry {
   user: User;

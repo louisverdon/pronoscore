@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { useAuth } from "@/lib/auth-context";
+import { useAuth } from "@pronoscore/shared";
 
 export default function HomePage() {
   const { user, loading } = useAuth();

@@ -1,9 +1,8 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import type { Match } from "@/lib/types";
-import { getPrediction, savePrediction } from "@/lib/predictions";
-import { useAuth } from "@/lib/auth-context";
+import { useAuth, getPrediction, savePrediction } from "@pronoscore/shared";
+import type { Match } from "@pronoscore/shared";
 
 interface MatchCardProps {
   match: Match;

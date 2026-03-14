@@ -1,10 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useAuth } from "@/lib/auth-context";
-import { getUpcomingMatches } from "@/lib/matches";
+import { useAuth, getUpcomingMatches } from "@pronoscore/shared";
+import type { Match } from "@pronoscore/shared";
 import MatchCard from "@/components/MatchCard";
-import type { Match } from "@/lib/types";
 import Nav from "@/components/Nav";
 import RequireAuth from "@/components/RequireAuth";
 

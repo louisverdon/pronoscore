@@ -2,7 +2,7 @@
 
 import { Suspense, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useAuth } from "@/lib/auth-context";
+import { useAuth } from "@pronoscore/shared";
 
 function LoginContent() {
   const { user, loading, signInWithGoogle, authError } = useAuth();

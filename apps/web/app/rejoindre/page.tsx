@@ -2,13 +2,13 @@
 
 import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useAuth } from "@/lib/auth-context";
 import {
+  useAuth,
   getLeagueByInviteCode,
   isLeagueMember,
   joinLeague,
-} from "@/lib/leagues";
-import type { League } from "@/lib/types";
+} from "@pronoscore/shared";
+import type { League } from "@pronoscore/shared";
 import Nav from "@/components/Nav";
 
 function RejoindreContent() {
