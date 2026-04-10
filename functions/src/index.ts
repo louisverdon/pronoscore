@@ -233,31 +233,30 @@ function computePoints(
   return 0;
 }
 
-/** Traite un match terminé : met à jour les pronostics et le currentScore des utilisateurs. */
-async function processFinishedMatch(
+/**
+ * Réconcilie les points d'un match terminé:
+ * - recalcule les points de tous les pronostics du match
+ * - applique la différence (delta) sur currentScore des utilisateurs
+ * - met à jour le champ points du pronostic si nécessaire
+ */
+async function reconcileFinishedMatchScores(
   db: admin.firestore.Firestore,
   matchId: string,
   matchData: admin.firestore.DocumentData
 ): Promise<number> {
   const realHome = Number(matchData.homeScore ?? 0);
   const realAway = Number(matchData.awayScore ?? 0);
-
-  // S'assurer que matchId est une string
   const matchIdStr = String(matchId);
 
-  // Essayer d'abord avec matchId en string (format standard)
   let preds = await db
     .collection("predictions")
     .where("matchId", "==", matchIdStr)
     .get();
 
-  // Si aucun pronostic trouvé et matchId ressemble à un nombre, essayer en number
   if (preds.empty && /^\d+$/.test(matchIdStr)) {
     preds = await db.collection("predictions").where("matchId", "==", Number(matchIdStr)).get();
   }
 
-  // Dernier recours: récupérer tous les pronostics et filtrer par matchId en mémoire
-  // (gère les cas où matchId est stocké sous un format inattendu)
   if (preds.empty) {
     const allPreds = await db.collection("predictions").limit(500).get();
     const filtered = allPreds.docs.filter((d) => {
@@ -266,50 +265,53 @@ async function processFinishedMatch(
     });
     if (filtered.length > 0) {
       preds = { docs: filtered, empty: false, size: filtered.length } as admin.firestore.QuerySnapshot;
-      functions.logger.info("processFinishedMatch: pronostics trouvés via fallback (filter)", {
-        matchId: matchIdStr,
-        count: filtered.length,
-      });
     }
   }
 
   if (preds.empty) {
-    functions.logger.warn("processFinishedMatch: aucun pronostic trouvé", {
-      matchId: matchIdStr,
-      realScore: `${realHome}-${realAway}`,
-      hint: "Vérifiez dans Firestore que des documents 'predictions' existent avec matchId === '" + matchIdStr + "'",
-    });
+    return 0;
   }
-
-  functions.logger.info("processFinishedMatch", {
-    matchId: matchIdStr,
-    realScore: `${realHome}-${realAway}`,
-    predictionsFound: preds.size,
-  });
 
   const batch = db.batch();
   let updated = 0;
+
   for (const predDoc of preds.docs) {
     const data = predDoc.data();
-    if (data.points !== undefined && data.points !== null) continue;
-    const points = computePoints(
+    const nextPoints = computePoints(
       data.homeScore ?? 0,
       data.awayScore ?? 0,
       realHome,
       realAway
     );
-    batch.update(predDoc.ref, { points });
-    const userId = data.userId;
-    if (userId) {
-      const userRef = db.collection("users").doc(userId);
-      batch.set(userRef, { currentScore: admin.firestore.FieldValue.increment(points) }, { merge: true });
+    const prevPointsRaw = data.points;
+    const prevPoints =
+      typeof prevPointsRaw === "number" && Number.isFinite(prevPointsRaw) ? prevPointsRaw : 0;
+    const delta = nextPoints - prevPoints;
+
+    if (delta === 0 && prevPointsRaw === nextPoints) {
+      continue;
     }
+
+    batch.update(predDoc.ref, { points: nextPoints });
+
+    const userId = data.userId;
+    if (userId && delta !== 0) {
+      const userRef = db.collection("users").doc(userId);
+      batch.set(userRef, { currentScore: admin.firestore.FieldValue.increment(delta) }, { merge: true });
+    }
+
     updated++;
   }
+
   if (updated > 0) {
     await batch.commit();
-    functions.logger.info("processFinishedMatch committed", { matchId: matchIdStr, updated });
+    functions.logger.info("reconcileFinishedMatchScores committed", {
+      matchId: matchIdStr,
+      updated,
+      realScore: `${realHome}-${realAway}`,
+    });
   }
+
   return updated;
 }
 
@@ -454,7 +456,7 @@ export const calculateScoresManual = functions.https.onRequest(async (req, res) 
     const details: { matchId: string; updated: number }[] = [];
     let totalUpdated = 0;
     for (const matchDoc of finished.docs) {
-      const n = await processFinishedMatch(db, matchDoc.id, matchDoc.data());
+      const n = await reconcileFinishedMatchScores(db, matchDoc.id, matchDoc.data());
       totalUpdated += n;
       details.push({ matchId: matchDoc.id, updated: n });
     }
@@ -486,6 +488,32 @@ export const calculateScores = functions.pubsub
   });
 
 /**
+ * Vérification quotidienne des matchs terminés.
+ * Recalcule les points et corrige currentScore si un score officiel a été modifié après coup.
+ */
+export const reconcileFinishedMatchesDaily = functions.pubsub
+  .schedule("0 0 * * *")
+  .timeZone("Europe/Paris")
+  .onRun(async () => {
+    const db = admin.firestore();
+    const finished = await db
+      .collection("matches")
+      .where("status", "==", "FINISHED")
+      .get();
+
+    let totalUpdated = 0;
+    for (const matchDoc of finished.docs) {
+      totalUpdated += await reconcileFinishedMatchScores(db, matchDoc.id, matchDoc.data());
+    }
+
+    functions.logger.info("reconcileFinishedMatchesDaily done", {
+      matchesChecked: finished.size,
+      predictionsUpdated: totalUpdated,
+    });
+    return null;
+  });
+
+/**
  * Traite tous les matchs terminés (appelé par onMatchFinished et calculateScores).
  * Traiter tous les matchs en une seule exécution évite les conditions de concurrence
  * quand plusieurs matchs se terminent simultanément (un seul batch d'incréments par user).
@@ -497,7 +525,7 @@ async function processAllFinishedMatches(db: admin.firestore.Firestore): Promise
     .get();
 
   for (const matchDoc of finished.docs) {
-    await processFinishedMatch(db, matchDoc.id, matchDoc.data());
+    await reconcileFinishedMatchScores(db, matchDoc.id, matchDoc.data());
   }
 }
 
@@ -515,7 +543,7 @@ export const onMatchFinished = functions.firestore
     functions.logger.info("onMatchFinished triggered", { matchId });
 
     // 1. Traiter d'abord le match déclencheur (évite la cohérence éventuelle)
-    await processFinishedMatch(db, matchId, after);
+    await reconcileFinishedMatchScores(db, matchId, after);
 
     // 2. Traiter les autres matchs terminés (plusieurs matchs peuvent finir en même temps)
     await processAllFinishedMatches(db);
@@ -536,7 +564,7 @@ export const onMatchCreated = functions.firestore
     const db = admin.firestore();
     functions.logger.info("onMatchCreated (FINISHED) triggered", { matchId });
 
-    await processFinishedMatch(db, matchId, data);
+    await reconcileFinishedMatchScores(db, matchId, data);
     return null;
   });
 
