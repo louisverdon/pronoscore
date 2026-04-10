@@ -30,34 +30,112 @@ interface FootballResponse {
 }
 
 /**
- * Vérifie si on doit récupérer les prochains matchs (7 jours) :
- * - Oui si la base est vide
- * - Oui si tous les matchs en base sont FINISHED
- * - Non sinon
+ * Détermine le mode de synchronisation selon l'état de la base :
+ * - "next_matchday" : base vide ou tous les matchs sont FINISHED/POSTPONED
+ * - "update_1min"   : au moins un match en cours (IN_PLAY, PAUSED, LIVE)
+ * - "update_5min"   : matchs en base mais aucun en cours
  */
-async function shouldFetchUpcomingMatches(
+type SyncMode = "next_matchday" | "update_1min" | "update_5min";
+
+const LIVE_STATUSES = ["IN_PLAY", "PAUSED", "LIVE"];
+const DONE_STATUSES = ["FINISHED", "POSTPONED"];
+
+/** Intervalles de throttling (en ms) par mode */
+const SYNC_INTERVALS: Record<SyncMode, number> = {
+  update_1min: 60 * 1000,
+  update_5min: 5 * 60 * 1000,
+  next_matchday: 30 * 60 * 1000,
+};
+
+async function determineSyncMode(
   db: admin.firestore.Firestore
-): Promise<boolean> {
+): Promise<SyncMode> {
   const snapshot = await db.collection("matches").get();
-  if (snapshot.empty) return true;
-  const allFinished = snapshot.docs.every(
-    (d) => (d.data().status as string) === "FINISHED"
-  );
-  return allFinished;
+  if (snapshot.empty) return "next_matchday";
+
+  const statuses = snapshot.docs.map((d) => d.data().status as string);
+
+  if (statuses.some((s) => LIVE_STATUSES.includes(s))) return "update_1min";
+  if (statuses.every((s) => DONE_STATUSES.includes(s))) return "next_matchday";
+  return "update_5min";
 }
 
 /**
- * Retourne l'URL pour récupérer les prochains matchs de la journée et des jours à venir.
- * Utilise dateFrom/dateTo pour couvrir aujourd'hui + 7 jours.
+ * Retourne true si assez de temps s'est écoulé depuis la dernière sync
+ * (ou si le mode a changé, pour réagir immédiatement).
  */
-function getMatchesUrlForUpcomingMatches(): string {
-  const today = new Date();
-  const future = new Date(today);
-  future.setDate(future.getDate() + 7);
-  const dateFrom = today.toISOString().split("T")[0];
-  const dateTo = future.toISOString().split("T")[0];
-  const params = new URLSearchParams({ dateFrom, dateTo });
-  return `${FL1_MATCHES_URL}?${params.toString()}`;
+async function shouldRunSync(
+  db: admin.firestore.Firestore,
+  mode: SyncMode
+): Promise<boolean> {
+  const stateDoc = await db.doc("config/syncState").get();
+  if (!stateDoc.exists) return true;
+
+  const data = stateDoc.data();
+  const lastMode = data?.lastMode as string | undefined;
+  const lastSyncAt = data?.lastSyncAt as admin.firestore.Timestamp | undefined;
+
+  if (!lastSyncAt) return true;
+  if (lastMode !== mode) return true;
+
+  return Date.now() - lastSyncAt.toMillis() >= SYNC_INTERVALS[mode];
+}
+
+async function recordSyncAt(
+  db: admin.firestore.Firestore,
+  mode: SyncMode
+): Promise<void> {
+  await db.doc("config/syncState").set(
+    { lastSyncAt: admin.firestore.FieldValue.serverTimestamp(), lastMode: mode },
+    { merge: true }
+  );
+}
+
+function formatDateUTC(date: Date): string {
+  return date.toISOString().split("T")[0];
+}
+
+function getCurrentWeekRangeUTC(reference = new Date()): { dateFrom: string; dateTo: string } {
+  const day = reference.getUTCDay(); // 0 = dimanche, 1 = lundi, ..., 6 = samedi
+  const mondayOffset = day === 0 ? -6 : 1 - day;
+
+  const monday = new Date(reference);
+  monday.setUTCDate(reference.getUTCDate() + mondayOffset);
+  monday.setUTCHours(0, 0, 0, 0);
+
+  const sunday = new Date(monday);
+  sunday.setUTCDate(monday.getUTCDate() + 6);
+  sunday.setUTCHours(23, 59, 59, 999);
+
+  return { dateFrom: formatDateUTC(monday), dateTo: formatDateUTC(sunday) };
+}
+
+/**
+ * Synchronise les matchs de la semaine courante (lundi -> dimanche).
+ */
+async function fetchCurrentWeekMatches(db: admin.firestore.Firestore): Promise<number> {
+  const { dateFrom, dateTo } = getCurrentWeekRangeUTC();
+  const url = `${FL1_MATCHES_URL}?${new URLSearchParams({ dateFrom, dateTo }).toString()}`;
+  console.log(`Récupération hebdomadaire : ${dateFrom} → ${dateTo}`);
+
+  const res = await fetch(url, { headers: { "X-Auth-Token": FOOTBALL_API_KEY } });
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  const data: FootballResponse = await res.json();
+
+  const batch = db.batch();
+  for (const m of data.matches) {
+    const ref = db.collection("matches").doc(String(m.id));
+    batch.set(ref, toFirestoreMatch(m), { merge: true });
+  }
+  await batch.commit();
+  return data.matches.length;
+}
+
+async function syncMatchesForMode(
+  db: admin.firestore.Firestore,
+  mode: SyncMode
+): Promise<number> {
+  return fetchCurrentWeekMatches(db);
 }
 
 function toFirestoreMatch(m: FootballMatch) {
@@ -82,8 +160,7 @@ function toFirestoreMatch(m: FootballMatch) {
 }
 
 /**
- * HTTP endpoint to manually trigger match sync (for initial setup).
- * Requires Firebase Auth or can be restricted by App Check.
+ * HTTP endpoint to manually trigger match sync (bypasses throttle).
  */
 export const syncMatchesManual = functions.https.onRequest(async (req, res) => {
   if (req.method !== "POST") {
@@ -96,27 +173,10 @@ export const syncMatchesManual = functions.https.onRequest(async (req, res) => {
   }
   try {
     const db = admin.firestore();
-    if (!(await shouldFetchUpcomingMatches(db))) {
-      res.status(200).json({
-        synced: 0,
-        reason: "Base contains non-finished matches, skipping fetch",
-      });
-      return;
-    }
-    const matchesUrl = getMatchesUrlForUpcomingMatches();
-    const apiRes = await fetch(matchesUrl, {
-      headers: { "X-Auth-Token": FOOTBALL_API_KEY },
-    });
-    if (!apiRes.ok) throw new Error(`API error: ${apiRes.status}`);
-    const data: FootballResponse = await apiRes.json();
-    const batch = db.batch();
-    for (const m of data.matches) {
-      const fm = toFirestoreMatch(m);
-      const ref = db.collection("matches").doc(String(m.id));
-      batch.set(ref, fm, { merge: true });
-    }
-    await batch.commit();
-    res.status(200).json({ synced: data.matches.length });
+    const mode = await determineSyncMode(db);
+    const count = await syncMatchesForMode(db, mode);
+    await recordSyncAt(db, mode);
+    res.status(200).json({ synced: count, mode });
   } catch (e) {
     console.error(e);
     res.status(500).send(String(e));
@@ -124,7 +184,11 @@ export const syncMatchesManual = functions.https.onRequest(async (req, res) => {
 });
 
 /**
- * Sync Ligue 1 matches from football-data.org every 3 hours.
+ * Sync Ligue 1 matches — tourne toutes les minutes, mais le throttling interne
+ * adapte la fréquence réelle selon l'état de la base :
+ * - Base vide / tous terminés : sync hebdomadaire (throttle 30 min)
+ * - Matchs en cours (IN_PLAY) : mise à jour toutes les minutes
+ * - Matchs planifiés (SCHEDULED/TIMED) : mise à jour toutes les 5 minutes
  */
 export const syncMatches = functions.pubsub
   .schedule("every 1 minutes")
@@ -135,28 +199,16 @@ export const syncMatches = functions.pubsub
     }
 
     const db = admin.firestore();
-    if (!(await shouldFetchUpcomingMatches(db))) {
-      console.log(
-        "Base contains non-finished matches, skipping upcoming matches fetch"
-      );
+    const mode = await determineSyncMode(db);
+
+    if (!(await shouldRunSync(db, mode))) {
+      console.log(`Mode: ${mode} — throttle actif, sync ignorée`);
       return null;
     }
-    const matchesUrl = getMatchesUrlForUpcomingMatches();
-    const res = await fetch(matchesUrl, {
-      headers: { "X-Auth-Token": FOOTBALL_API_KEY },
-    });
-    if (!res.ok) {
-      throw new Error(`Football API error: ${res.status}`);
-    }
-    const data: FootballResponse = await res.json();
-    const batch = db.batch();
-    for (const m of data.matches) {
-      const fm = toFirestoreMatch(m);
-      const ref = db.collection("matches").doc(String(m.id));
-      batch.set(ref, fm, { merge: true });
-    }
-    await batch.commit();
-    console.log(`Synced ${data.matches.length} matches`);
+
+    const count = await syncMatchesForMode(db, mode);
+    await recordSyncAt(db, mode);
+    console.log(`Mode: ${mode} — ${count} matchs synchronisés`);
     return null;
   });
 
@@ -181,31 +233,30 @@ function computePoints(
   return 0;
 }
 
-/** Traite un match terminé : met à jour les pronostics et le currentScore des utilisateurs. */
-async function processFinishedMatch(
+/**
+ * Réconcilie les points d'un match terminé:
+ * - recalcule les points de tous les pronostics du match
+ * - applique la différence (delta) sur currentScore des utilisateurs
+ * - met à jour le champ points du pronostic si nécessaire
+ */
+async function reconcileFinishedMatchScores(
   db: admin.firestore.Firestore,
   matchId: string,
   matchData: admin.firestore.DocumentData
 ): Promise<number> {
   const realHome = Number(matchData.homeScore ?? 0);
   const realAway = Number(matchData.awayScore ?? 0);
-
-  // S'assurer que matchId est une string
   const matchIdStr = String(matchId);
 
-  // Essayer d'abord avec matchId en string (format standard)
   let preds = await db
     .collection("predictions")
     .where("matchId", "==", matchIdStr)
     .get();
 
-  // Si aucun pronostic trouvé et matchId ressemble à un nombre, essayer en number
   if (preds.empty && /^\d+$/.test(matchIdStr)) {
     preds = await db.collection("predictions").where("matchId", "==", Number(matchIdStr)).get();
   }
 
-  // Dernier recours: récupérer tous les pronostics et filtrer par matchId en mémoire
-  // (gère les cas où matchId est stocké sous un format inattendu)
   if (preds.empty) {
     const allPreds = await db.collection("predictions").limit(500).get();
     const filtered = allPreds.docs.filter((d) => {
@@ -214,50 +265,53 @@ async function processFinishedMatch(
     });
     if (filtered.length > 0) {
       preds = { docs: filtered, empty: false, size: filtered.length } as admin.firestore.QuerySnapshot;
-      functions.logger.info("processFinishedMatch: pronostics trouvés via fallback (filter)", {
-        matchId: matchIdStr,
-        count: filtered.length,
-      });
     }
   }
 
   if (preds.empty) {
-    functions.logger.warn("processFinishedMatch: aucun pronostic trouvé", {
-      matchId: matchIdStr,
-      realScore: `${realHome}-${realAway}`,
-      hint: "Vérifiez dans Firestore que des documents 'predictions' existent avec matchId === '" + matchIdStr + "'",
-    });
+    return 0;
   }
-
-  functions.logger.info("processFinishedMatch", {
-    matchId: matchIdStr,
-    realScore: `${realHome}-${realAway}`,
-    predictionsFound: preds.size,
-  });
 
   const batch = db.batch();
   let updated = 0;
+
   for (const predDoc of preds.docs) {
     const data = predDoc.data();
-    if (data.points !== undefined && data.points !== null) continue;
-    const points = computePoints(
+    const nextPoints = computePoints(
       data.homeScore ?? 0,
       data.awayScore ?? 0,
       realHome,
       realAway
     );
-    batch.update(predDoc.ref, { points });
-    const userId = data.userId;
-    if (userId) {
-      const userRef = db.collection("users").doc(userId);
-      batch.set(userRef, { currentScore: admin.firestore.FieldValue.increment(points) }, { merge: true });
+    const prevPointsRaw = data.points;
+    const prevPoints =
+      typeof prevPointsRaw === "number" && Number.isFinite(prevPointsRaw) ? prevPointsRaw : 0;
+    const delta = nextPoints - prevPoints;
+
+    if (delta === 0 && prevPointsRaw === nextPoints) {
+      continue;
     }
+
+    batch.update(predDoc.ref, { points: nextPoints });
+
+    const userId = data.userId;
+    if (userId && delta !== 0) {
+      const userRef = db.collection("users").doc(userId);
+      batch.set(userRef, { currentScore: admin.firestore.FieldValue.increment(delta) }, { merge: true });
+    }
+
     updated++;
   }
+
   if (updated > 0) {
     await batch.commit();
-    functions.logger.info("processFinishedMatch committed", { matchId: matchIdStr, updated });
+    functions.logger.info("reconcileFinishedMatchScores committed", {
+      matchId: matchIdStr,
+      updated,
+      realScore: `${realHome}-${realAway}`,
+    });
   }
+
   return updated;
 }
 
@@ -402,7 +456,7 @@ export const calculateScoresManual = functions.https.onRequest(async (req, res) 
     const details: { matchId: string; updated: number }[] = [];
     let totalUpdated = 0;
     for (const matchDoc of finished.docs) {
-      const n = await processFinishedMatch(db, matchDoc.id, matchDoc.data());
+      const n = await reconcileFinishedMatchScores(db, matchDoc.id, matchDoc.data());
       totalUpdated += n;
       details.push({ matchId: matchDoc.id, updated: n });
     }
@@ -434,6 +488,32 @@ export const calculateScores = functions.pubsub
   });
 
 /**
+ * Vérification quotidienne des matchs terminés.
+ * Recalcule les points et corrige currentScore si un score officiel a été modifié après coup.
+ */
+export const reconcileFinishedMatchesDaily = functions.pubsub
+  .schedule("0 0 * * *")
+  .timeZone("Europe/Paris")
+  .onRun(async () => {
+    const db = admin.firestore();
+    const finished = await db
+      .collection("matches")
+      .where("status", "==", "FINISHED")
+      .get();
+
+    let totalUpdated = 0;
+    for (const matchDoc of finished.docs) {
+      totalUpdated += await reconcileFinishedMatchScores(db, matchDoc.id, matchDoc.data());
+    }
+
+    functions.logger.info("reconcileFinishedMatchesDaily done", {
+      matchesChecked: finished.size,
+      predictionsUpdated: totalUpdated,
+    });
+    return null;
+  });
+
+/**
  * Traite tous les matchs terminés (appelé par onMatchFinished et calculateScores).
  * Traiter tous les matchs en une seule exécution évite les conditions de concurrence
  * quand plusieurs matchs se terminent simultanément (un seul batch d'incréments par user).
@@ -445,7 +525,7 @@ async function processAllFinishedMatches(db: admin.firestore.Firestore): Promise
     .get();
 
   for (const matchDoc of finished.docs) {
-    await processFinishedMatch(db, matchDoc.id, matchDoc.data());
+    await reconcileFinishedMatchScores(db, matchDoc.id, matchDoc.data());
   }
 }
 
@@ -463,7 +543,7 @@ export const onMatchFinished = functions.firestore
     functions.logger.info("onMatchFinished triggered", { matchId });
 
     // 1. Traiter d'abord le match déclencheur (évite la cohérence éventuelle)
-    await processFinishedMatch(db, matchId, after);
+    await reconcileFinishedMatchScores(db, matchId, after);
 
     // 2. Traiter les autres matchs terminés (plusieurs matchs peuvent finir en même temps)
     await processAllFinishedMatches(db);
@@ -484,6 +564,30 @@ export const onMatchCreated = functions.firestore
     const db = admin.firestore();
     functions.logger.info("onMatchCreated (FINISHED) triggered", { matchId });
 
-    await processFinishedMatch(db, matchId, data);
+    await reconcileFinishedMatchScores(db, matchId, data);
+    return null;
+  });
+
+/**
+ * Quand un membre quitte une ligue, supprime la ligue si elle n'a plus aucun membre.
+ */
+export const onLeagueMemberDeleted = functions.firestore
+  .document("leagueMembers/{memberId}")
+  .onDelete(async (snap) => {
+    const data = snap.data();
+    const leagueId = data?.leagueId as string | undefined;
+    if (!leagueId) return null;
+
+    const db = admin.firestore();
+    const remaining = await db
+      .collection("leagueMembers")
+      .where("leagueId", "==", leagueId)
+      .limit(1)
+      .get();
+
+    if (remaining.empty) {
+      await db.collection("leagues").doc(leagueId).delete();
+      functions.logger.info("onLeagueMemberDeleted: ligue vide supprimée", { leagueId });
+    }
     return null;
   });

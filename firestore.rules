@@ -28,11 +28,19 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
-    // League members: add self, read if auth
+    // League members: add self, read if auth, delete own membership (quitter une ligue)
+    // ou suppression par le créateur de la ligue
     match /leagueMembers/{memberId} {
       allow read: if request.auth != null;
       allow create: if request.auth != null && request.resource.data.userId == request.auth.uid;
-      allow update, delete: if false;
+      allow update: if false;
+      allow delete: if request.auth != null
+        && (
+          // l'utilisateur quitte lui-même la ligue
+          resource.data.userId == request.auth.uid
+          // ou le créateur de la ligue exclut un membre
+          || get(/databases/$(database)/documents/leagues/$(resource.data.leagueId)).data.createdBy == request.auth.uid
+        );
     }
   }
 }

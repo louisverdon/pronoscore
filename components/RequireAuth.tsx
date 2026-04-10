@@ -1,12 +1,12 @@
 "use client";
 
 import { useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 
 /**
  * Wrapper pour les pages protégées. Redirige vers /login si l'utilisateur n'est pas connecté.
- * Évite d'afficher "Chargement..." indéfiniment quand user est null.
+ * Transmet la page actuelle en paramètre redirect pour y revenir après connexion.
  */
 export default function RequireAuth({
   children,
@@ -15,12 +15,14 @@ export default function RequireAuth({
 }) {
   const { user, loading } = useAuth();
   const router = useRouter();
+  const pathname = usePathname();
 
   useEffect(() => {
     if (!loading && !user) {
-      router.replace("/login");
+      const redirect = pathname && pathname !== "/" ? pathname : "";
+      router.replace(redirect ? `/login?redirect=${encodeURIComponent(redirect)}` : "/login");
     }
-  }, [loading, user, router]);
+  }, [loading, user, router, pathname]);
 
   // Redirection en cours : ne pas afficher "Chargement..." (on n'attend pas un user)
   if (!loading && !user) {
