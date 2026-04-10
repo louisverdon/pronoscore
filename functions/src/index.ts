@@ -91,74 +91,32 @@ async function recordSyncAt(
   );
 }
 
-/**
- * Récupère les matchs de la prochaine journée (matchday) non encore terminée.
- * Cherche sur les 30 prochains jours et ne stocke que les matchs du premier matchday trouvé.
- */
-async function fetchNextMatchday(db: admin.firestore.Firestore): Promise<number> {
-  const today = new Date();
-  const future = new Date(today);
-  future.setDate(future.getDate() + 30);
-  const dateFrom = today.toISOString().split("T")[0];
-  const dateTo = future.toISOString().split("T")[0];
-  const params = new URLSearchParams({ dateFrom, dateTo });
-  const url = `${FL1_MATCHES_URL}?${params.toString()}`;
+function formatDateUTC(date: Date): string {
+  return date.toISOString().split("T")[0];
+}
 
-  const res = await fetch(url, { headers: { "X-Auth-Token": FOOTBALL_API_KEY } });
-  if (!res.ok) throw new Error(`API error: ${res.status}`);
-  const data: FootballResponse = await res.json();
+function getCurrentWeekRangeUTC(reference = new Date()): { dateFrom: string; dateTo: string } {
+  const day = reference.getUTCDay(); // 0 = dimanche, 1 = lundi, ..., 6 = samedi
+  const mondayOffset = day === 0 ? -6 : 1 - day;
 
-  const upcoming = data.matches.filter(
-    (m) => !DONE_STATUSES.includes(m.status) && m.matchday != null
-  );
-  if (upcoming.length === 0) {
-    console.log("Aucun match à venir dans les 30 prochains jours");
-    return 0;
-  }
+  const monday = new Date(reference);
+  monday.setUTCDate(reference.getUTCDate() + mondayOffset);
+  monday.setUTCHours(0, 0, 0, 0);
 
-  const nextMatchday = Math.min(...upcoming.map((m) => m.matchday as number));
-  const toStore = data.matches.filter((m) => m.matchday === nextMatchday);
+  const sunday = new Date(monday);
+  sunday.setUTCDate(monday.getUTCDate() + 6);
+  sunday.setUTCHours(23, 59, 59, 999);
 
-  const batch = db.batch();
-  for (const m of toStore) {
-    const ref = db.collection("matches").doc(String(m.id));
-    batch.set(ref, toFirestoreMatch(m), { merge: true });
-  }
-  await batch.commit();
-  return toStore.length;
+  return { dateFrom: formatDateUTC(monday), dateTo: formatDateUTC(sunday) };
 }
 
 /**
- * Met à jour les matchs de la journée en cours.
- * Récupère le numéro de journée active depuis Firestore, puis interroge
- * l'API avec ?matchday=X pour avoir tous les matchs de cette journée.
- * Si aucun matchday n'est trouvé en base, repli sur ±3 jours autour d'aujourd'hui.
+ * Synchronise les matchs de la semaine courante (lundi -> dimanche).
  */
-async function fetchCurrentMatches(db: admin.firestore.Firestore): Promise<number> {
-  // Trouver le matchday actif (SCHEDULED, TIMED ou IN_PLAY) depuis Firestore
-  const snapshot = await db.collection("matches").get();
-  const activeMatchdays = snapshot.docs
-    .map((d) => d.data())
-    .filter((d) => !DONE_STATUSES.includes(d.status) && d.matchday != null)
-    .map((d) => d.matchday as number);
-
-  let url: string;
-  if (activeMatchdays.length > 0) {
-    const currentMatchday = Math.min(...activeMatchdays);
-    url = `${FL1_MATCHES_URL}?matchday=${currentMatchday}`;
-    console.log(`Récupération journée ${currentMatchday}`);
-  } else {
-    // Repli : fenêtre de ±3 jours autour d'aujourd'hui
-    const today = new Date();
-    const past = new Date(today);
-    past.setDate(past.getDate() - 3);
-    const future = new Date(today);
-    future.setDate(future.getDate() + 3);
-    const dateFrom = past.toISOString().split("T")[0];
-    const dateTo = future.toISOString().split("T")[0];
-    url = `${FL1_MATCHES_URL}?${new URLSearchParams({ dateFrom, dateTo }).toString()}`;
-    console.log(`Récupération par date (repli) : ${dateFrom} → ${dateTo}`);
-  }
+async function fetchCurrentWeekMatches(db: admin.firestore.Firestore): Promise<number> {
+  const { dateFrom, dateTo } = getCurrentWeekRangeUTC();
+  const url = `${FL1_MATCHES_URL}?${new URLSearchParams({ dateFrom, dateTo }).toString()}`;
+  console.log(`Récupération hebdomadaire : ${dateFrom} → ${dateTo}`);
 
   const res = await fetch(url, { headers: { "X-Auth-Token": FOOTBALL_API_KEY } });
   if (!res.ok) throw new Error(`API error: ${res.status}`);
@@ -177,8 +135,7 @@ async function syncMatchesForMode(
   db: admin.firestore.Firestore,
   mode: SyncMode
 ): Promise<number> {
-  if (mode === "next_matchday") return fetchNextMatchday(db);
-  return fetchCurrentMatches(db);
+  return fetchCurrentWeekMatches(db);
 }
 
 function toFirestoreMatch(m: FootballMatch) {
@@ -229,7 +186,7 @@ export const syncMatchesManual = functions.https.onRequest(async (req, res) => {
 /**
  * Sync Ligue 1 matches — tourne toutes les minutes, mais le throttling interne
  * adapte la fréquence réelle selon l'état de la base :
- * - Base vide / tous terminés : récupère la prochaine journée (throttle 30 min)
+ * - Base vide / tous terminés : sync hebdomadaire (throttle 30 min)
  * - Matchs en cours (IN_PLAY) : mise à jour toutes les minutes
  * - Matchs planifiés (SCHEDULED/TIMED) : mise à jour toutes les 5 minutes
  */
