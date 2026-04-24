@@ -213,6 +213,33 @@ curl -X POST https://us-central1-pronoscore-dev.cloudfunctions.net/calculateScor
 Invoke-WebRequest -Method POST -UseBasicParsing -Uri "https://us-central1-pronoscore-dev.cloudfunctions.net/calculateScoresManual"
 ```
 
+### 4. Lancer manuellement `reconcileFinishedMatchesDaily`
+
+La fonction `reconcileFinishedMatchesDaily` est une tâche planifiée (Cloud Scheduler + Pub/Sub).  
+Pour la lancer manuellement sans attendre minuit (Europe/Paris), déclenchez son job Scheduler.
+
+```bash
+# 1) Se placer sur le bon projet
+firebase use dev   # ou production
+
+# 2) Lister les jobs scheduler pour retrouver le nom exact
+gcloud scheduler jobs list --location=us-central1
+
+# 3) Lancer le job de reconcile manuellement
+gcloud scheduler jobs run <JOB_NAME> --location=us-central1
+```
+
+Le job à lancer est celui créé pour `reconcileFinishedMatchesDaily` (souvent un nom du type `firebase-schedule-reconcileFinishedMatchesDaily-...`).
+
+Exemple :
+
+```bash
+gcloud scheduler jobs run firebase-schedule-reconcileFinishedMatchesDaily-us-central1 --location=us-central1
+```
+
+Après exécution, vérifiez les logs de la function pour contrôler les compteurs :
+`matchesChecked`, `matchesScoreChanged`, `matchesSkippedNoChange`, `matchesSkippedMissingOfficialScore`, `predictionsUpdated`, `usersScoreAdjusted`, `totalDeltaApplied`.
+
 ### Workflow de test complet
 
 1. `addTestMatches` — créer les 5 matchs
