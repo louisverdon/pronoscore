@@ -29,6 +29,24 @@ interface FootballResponse {
   matches: FootballMatch[];
 }
 
+interface FootballMatchResponse {
+  match: FootballMatch;
+}
+
+interface ReconcileResult {
+  predictionsUpdated: number;
+  usersScoreAdjusted: number;
+  totalDeltaApplied: number;
+}
+
+interface DailyReconcileCounters extends ReconcileResult {
+  matchesChecked: number;
+  matchesScoreChanged: number;
+  matchesSkippedNoChange: number;
+  matchesSkippedMissingOfficialScore: number;
+  matchesApiErrors: number;
+}
+
 /**
  * Détermine le mode de synchronisation selon l'état de la base :
  * - "next_matchday" : base vide ou tous les matchs sont FINISHED/POSTPONED
@@ -159,6 +177,92 @@ function toFirestoreMatch(m: FootballMatch) {
   };
 }
 
+function parseFiniteNumber(value: unknown): number | null {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function hasOfficialScore(
+  score: Partial<{ home: number | null; away: number | null }> | null | undefined
+): score is { home: number; away: number } {
+  return typeof score?.home === "number" && typeof score?.away === "number";
+}
+
+function normalizePredictionMatchId(value: unknown): string {
+  return value === null || value === undefined ? "" : String(value);
+}
+
+async function fetchOfficialMatchFromApi(
+  matchId: string
+): Promise<{ status: string; home: number | null; away: number | null }> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10_000);
+  try {
+    const res = await fetch(`${FL1_MATCHES_URL}/${matchId}`, {
+      headers: { "X-Auth-Token": FOOTBALL_API_KEY },
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      throw new Error(`API error ${res.status} for match ${matchId}`);
+    }
+    const payload: FootballMatchResponse = await res.json();
+    return {
+      status: payload.match?.status ?? "UNKNOWN",
+      home: payload.match?.score?.fullTime?.home ?? null,
+      away: payload.match?.score?.fullTime?.away ?? null,
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function getPredictionsForMatch(
+  db: admin.firestore.Firestore,
+  matchId: string
+): Promise<admin.firestore.QueryDocumentSnapshot[]> {
+  const docsById = new Map<string, admin.firestore.QueryDocumentSnapshot>();
+
+  const stringQuery = await db.collection("predictions").where("matchId", "==", matchId).get();
+  for (const doc of stringQuery.docs) docsById.set(doc.id, doc);
+
+  if (/^\d+$/.test(matchId)) {
+    const numberQuery = await db.collection("predictions").where("matchId", "==", Number(matchId)).get();
+    for (const doc of numberQuery.docs) docsById.set(doc.id, doc);
+  }
+
+  if (docsById.size > 0) {
+    return Array.from(docsById.values());
+  }
+
+  let cursor: admin.firestore.QueryDocumentSnapshot | null = null;
+  const pageSize = 500;
+
+  while (true) {
+    let query: admin.firestore.Query = db
+      .collection("predictions")
+      .orderBy(admin.firestore.FieldPath.documentId())
+      .limit(pageSize);
+
+    if (cursor) {
+      query = query.startAfter(cursor);
+    }
+
+    const page = await query.get();
+    if (page.empty) break;
+
+    for (const doc of page.docs) {
+      if (normalizePredictionMatchId(doc.data().matchId) === matchId) {
+        docsById.set(doc.id, doc);
+      }
+    }
+
+    if (page.size < pageSize) break;
+    cursor = page.docs[page.docs.length - 1];
+  }
+
+  return Array.from(docsById.values());
+}
+
 /**
  * HTTP endpoint to manually trigger match sync (bypasses throttle).
  */
@@ -243,43 +347,44 @@ async function reconcileFinishedMatchScores(
   db: admin.firestore.Firestore,
   matchId: string,
   matchData: admin.firestore.DocumentData
-): Promise<number> {
-  const realHome = Number(matchData.homeScore ?? 0);
-  const realAway = Number(matchData.awayScore ?? 0);
+): Promise<ReconcileResult> {
+  const realHome = parseFiniteNumber(matchData.homeScore);
+  const realAway = parseFiniteNumber(matchData.awayScore);
   const matchIdStr = String(matchId);
 
-  let preds = await db
-    .collection("predictions")
-    .where("matchId", "==", matchIdStr)
-    .get();
-
-  if (preds.empty && /^\d+$/.test(matchIdStr)) {
-    preds = await db.collection("predictions").where("matchId", "==", Number(matchIdStr)).get();
-  }
-
-  if (preds.empty) {
-    const allPreds = await db.collection("predictions").limit(500).get();
-    const filtered = allPreds.docs.filter((d) => {
-      const m = d.data().matchId;
-      return m === matchIdStr || m === matchId || String(m) === matchIdStr;
+  if (realHome === null || realAway === null) {
+    functions.logger.warn("reconcileFinishedMatchScores skipped: missing match score", {
+      matchId: matchIdStr,
+      homeScore: matchData.homeScore ?? null,
+      awayScore: matchData.awayScore ?? null,
     });
-    if (filtered.length > 0) {
-      preds = { docs: filtered, empty: false, size: filtered.length } as admin.firestore.QuerySnapshot;
-    }
+    return { predictionsUpdated: 0, usersScoreAdjusted: 0, totalDeltaApplied: 0 };
   }
 
-  if (preds.empty) {
-    return 0;
-  }
+  const predictionDocs = await getPredictionsForMatch(db, matchIdStr);
+  if (predictionDocs.length === 0) return { predictionsUpdated: 0, usersScoreAdjusted: 0, totalDeltaApplied: 0 };
 
-  const batch = db.batch();
-  let updated = 0;
+  let batch = db.batch();
+  let operationCount = 0;
+  let predictionsUpdated = 0;
+  let usersScoreAdjusted = 0;
+  let totalDeltaApplied = 0;
 
-  for (const predDoc of preds.docs) {
+  const commitBatchIfNeeded = async (force = false) => {
+    if (operationCount === 0) return;
+    if (!force && operationCount < 400) return;
+    await batch.commit();
+    batch = db.batch();
+    operationCount = 0;
+  };
+
+  for (const predDoc of predictionDocs) {
     const data = predDoc.data();
+    const predHome = parseFiniteNumber(data.homeScore) ?? 0;
+    const predAway = parseFiniteNumber(data.awayScore) ?? 0;
     const nextPoints = computePoints(
-      data.homeScore ?? 0,
-      data.awayScore ?? 0,
+      predHome,
+      predAway,
       realHome,
       realAway
     );
@@ -293,26 +398,34 @@ async function reconcileFinishedMatchScores(
     }
 
     batch.update(predDoc.ref, { points: nextPoints });
+    operationCount += 1;
+    predictionsUpdated += 1;
 
     const userId = data.userId;
     if (userId && delta !== 0) {
       const userRef = db.collection("users").doc(userId);
       batch.set(userRef, { currentScore: admin.firestore.FieldValue.increment(delta) }, { merge: true });
+      operationCount += 1;
+      usersScoreAdjusted += 1;
+      totalDeltaApplied += delta;
     }
 
-    updated++;
+    await commitBatchIfNeeded();
   }
 
-  if (updated > 0) {
-    await batch.commit();
+  await commitBatchIfNeeded(true);
+
+  if (predictionsUpdated > 0) {
     functions.logger.info("reconcileFinishedMatchScores committed", {
       matchId: matchIdStr,
-      updated,
+      predictionsUpdated,
+      usersScoreAdjusted,
+      totalDeltaApplied,
       realScore: `${realHome}-${realAway}`,
     });
   }
 
-  return updated;
+  return { predictionsUpdated, usersScoreAdjusted, totalDeltaApplied };
 }
 
 // --- Commandes de test (matchs fictifs) ---
@@ -456,9 +569,9 @@ export const calculateScoresManual = functions.https.onRequest(async (req, res) 
     const details: { matchId: string; updated: number }[] = [];
     let totalUpdated = 0;
     for (const matchDoc of finished.docs) {
-      const n = await reconcileFinishedMatchScores(db, matchDoc.id, matchDoc.data());
-      totalUpdated += n;
-      details.push({ matchId: matchDoc.id, updated: n });
+      const result = await reconcileFinishedMatchScores(db, matchDoc.id, matchDoc.data());
+      totalUpdated += result.predictionsUpdated;
+      details.push({ matchId: matchDoc.id, updated: result.predictionsUpdated });
     }
 
     // Option recalculate: recalculer currentScore depuis la somme des points des pronostics
@@ -495,20 +608,86 @@ export const reconcileFinishedMatchesDaily = functions.pubsub
   .schedule("0 0 * * *")
   .timeZone("Europe/Paris")
   .onRun(async () => {
-    const db = admin.firestore();
-    const finished = await db
-      .collection("matches")
-      .where("status", "==", "FINISHED")
-      .get();
+    const startedAt = Date.now();
+    if (!FOOTBALL_API_KEY) {
+      functions.logger.warn("reconcileFinishedMatchesDaily skipped: FOOTBALL_API_KEY missing");
+      return null;
+    }
 
-    let totalUpdated = 0;
-    for (const matchDoc of finished.docs) {
-      totalUpdated += await reconcileFinishedMatchScores(db, matchDoc.id, matchDoc.data());
+    const db = admin.firestore();
+    const finalStatuses = ["FINISHED"];
+
+    const counters: DailyReconcileCounters = {
+      matchesChecked: 0,
+      matchesScoreChanged: 0,
+      matchesSkippedNoChange: 0,
+      matchesSkippedMissingOfficialScore: 0,
+      matchesApiErrors: 0,
+      predictionsUpdated: 0,
+      usersScoreAdjusted: 0,
+      totalDeltaApplied: 0,
+    };
+
+    for (const status of finalStatuses) {
+      const finished = await db.collection("matches").where("status", "==", status).get();
+
+      for (const matchDoc of finished.docs) {
+        counters.matchesChecked += 1;
+        const local = matchDoc.data();
+        const localHome = parseFiniteNumber(local.homeScore);
+        const localAway = parseFiniteNumber(local.awayScore);
+        const matchId = String(matchDoc.id);
+
+        try {
+          const official = await fetchOfficialMatchFromApi(matchId);
+          if (!hasOfficialScore(official)) {
+            counters.matchesSkippedMissingOfficialScore += 1;
+            functions.logger.warn("reconcileFinishedMatchesDaily skipped: missing official score", {
+              matchId,
+              apiStatus: official.status,
+              apiHomeScore: official.home,
+              apiAwayScore: official.away,
+            });
+            continue;
+          }
+
+          const scoreChanged = localHome !== official.home || localAway !== official.away;
+          if (!scoreChanged) {
+            counters.matchesSkippedNoChange += 1;
+            continue;
+          }
+
+          counters.matchesScoreChanged += 1;
+          await matchDoc.ref.set(
+            {
+              homeScore: official.home,
+              awayScore: official.away,
+              status: official.status || local.status || "FINISHED",
+            },
+            { merge: true }
+          );
+
+          const result = await reconcileFinishedMatchScores(db, matchId, {
+            ...local,
+            homeScore: official.home,
+            awayScore: official.away,
+          });
+          counters.predictionsUpdated += result.predictionsUpdated;
+          counters.usersScoreAdjusted += result.usersScoreAdjusted;
+          counters.totalDeltaApplied += result.totalDeltaApplied;
+        } catch (error) {
+          counters.matchesApiErrors += 1;
+          functions.logger.error("reconcileFinishedMatchesDaily API error", {
+            matchId,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
     }
 
     functions.logger.info("reconcileFinishedMatchesDaily done", {
-      matchesChecked: finished.size,
-      predictionsUpdated: totalUpdated,
+      ...counters,
+      runDurationMs: Date.now() - startedAt,
     });
     return null;
   });
