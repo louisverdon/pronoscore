@@ -6,6 +6,7 @@ admin.initializeApp();
 const FOOTBALL_API_KEY = process.env.FOOTBALL_API_KEY || "";
 const FL1_BASE = "https://api.football-data.org/v4/competitions/FL1";
 const FL1_MATCHES_URL = `${FL1_BASE}/matches`;
+const MATCH_BY_ID_URL = "https://api.football-data.org/v4/matches";
 
 interface FootballTeam {
   id: number;
@@ -198,7 +199,9 @@ async function fetchOfficialMatchFromApi(
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 10_000);
   try {
-    const res = await fetch(`${FL1_MATCHES_URL}/${matchId}`, {
+    // L'endpoint "match by id" est global (/v4/matches/{id}),
+    // pas scoppé à une compétition (/competitions/FL1/matches/{id}).
+    const res = await fetch(`${MATCH_BY_ID_URL}/${encodeURIComponent(matchId)}`, {
       headers: { "X-Auth-Token": FOOTBALL_API_KEY },
       signal: controller.signal,
     });
@@ -676,10 +679,19 @@ export const reconcileFinishedMatchesDaily = functions.pubsub
           counters.usersScoreAdjusted += result.usersScoreAdjusted;
           counters.totalDeltaApplied += result.totalDeltaApplied;
         } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          if (message.includes("API error 404")) {
+            counters.matchesSkippedMissingOfficialScore += 1;
+            functions.logger.warn("reconcileFinishedMatchesDaily skipped: official match not found", {
+              matchId,
+              error: message,
+            });
+            continue;
+          }
           counters.matchesApiErrors += 1;
           functions.logger.error("reconcileFinishedMatchesDaily API error", {
             matchId,
-            error: error instanceof Error ? error.message : String(error),
+            error: message,
           });
         }
       }
