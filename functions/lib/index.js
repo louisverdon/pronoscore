@@ -7,6 +7,7 @@ admin.initializeApp();
 const FOOTBALL_API_KEY = process.env.FOOTBALL_API_KEY || "";
 const FL1_BASE = "https://api.football-data.org/v4/competitions/FL1";
 const FL1_MATCHES_URL = `${FL1_BASE}/matches`;
+const MATCH_BY_ID_URL = "https://api.football-data.org/v4/matches";
 const LIVE_STATUSES = ["IN_PLAY", "PAUSED", "LIVE"];
 const DONE_STATUSES = ["FINISHED", "POSTPONED"];
 /** Intervalles de throttling (en ms) par mode */
@@ -102,6 +103,77 @@ function toFirestoreMatch(m) {
         awayScore: m.score?.fullTime?.away ?? null,
     };
 }
+function parseFiniteNumber(value) {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : null;
+}
+function hasOfficialScore(score) {
+    return typeof score?.home === "number" && typeof score?.away === "number";
+}
+function normalizePredictionMatchId(value) {
+    return value === null || value === undefined ? "" : String(value);
+}
+async function fetchOfficialMatchFromApi(matchId) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10_000);
+    try {
+        // L'endpoint "match by id" est global (/v4/matches/{id}),
+        // pas scoppé à une compétition (/competitions/FL1/matches/{id}).
+        const res = await fetch(`${MATCH_BY_ID_URL}/${encodeURIComponent(matchId)}`, {
+            headers: { "X-Auth-Token": FOOTBALL_API_KEY },
+            signal: controller.signal,
+        });
+        if (!res.ok) {
+            throw new Error(`API error ${res.status} for match ${matchId}`);
+        }
+        const payload = await res.json();
+        return {
+            status: payload.match?.status ?? "UNKNOWN",
+            home: payload.match?.score?.fullTime?.home ?? null,
+            away: payload.match?.score?.fullTime?.away ?? null,
+        };
+    }
+    finally {
+        clearTimeout(timeout);
+    }
+}
+async function getPredictionsForMatch(db, matchId) {
+    const docsById = new Map();
+    const stringQuery = await db.collection("predictions").where("matchId", "==", matchId).get();
+    for (const doc of stringQuery.docs)
+        docsById.set(doc.id, doc);
+    if (/^\d+$/.test(matchId)) {
+        const numberQuery = await db.collection("predictions").where("matchId", "==", Number(matchId)).get();
+        for (const doc of numberQuery.docs)
+            docsById.set(doc.id, doc);
+    }
+    if (docsById.size > 0) {
+        return Array.from(docsById.values());
+    }
+    let cursor = null;
+    const pageSize = 500;
+    while (true) {
+        let query = db
+            .collection("predictions")
+            .orderBy(admin.firestore.FieldPath.documentId())
+            .limit(pageSize);
+        if (cursor) {
+            query = query.startAfter(cursor);
+        }
+        const page = await query.get();
+        if (page.empty)
+            break;
+        for (const doc of page.docs) {
+            if (normalizePredictionMatchId(doc.data().matchId) === matchId) {
+                docsById.set(doc.id, doc);
+            }
+        }
+        if (page.size < pageSize)
+            break;
+        cursor = page.docs[page.docs.length - 1];
+    }
+    return Array.from(docsById.values());
+}
 /**
  * HTTP endpoint to manually trigger match sync (bypasses throttle).
  */
@@ -174,34 +246,39 @@ function computePoints(predHome, predAway, realHome, realAway) {
  * - met à jour le champ points du pronostic si nécessaire
  */
 async function reconcileFinishedMatchScores(db, matchId, matchData) {
-    const realHome = Number(matchData.homeScore ?? 0);
-    const realAway = Number(matchData.awayScore ?? 0);
+    const realHome = parseFiniteNumber(matchData.homeScore);
+    const realAway = parseFiniteNumber(matchData.awayScore);
     const matchIdStr = String(matchId);
-    let preds = await db
-        .collection("predictions")
-        .where("matchId", "==", matchIdStr)
-        .get();
-    if (preds.empty && /^\d+$/.test(matchIdStr)) {
-        preds = await db.collection("predictions").where("matchId", "==", Number(matchIdStr)).get();
-    }
-    if (preds.empty) {
-        const allPreds = await db.collection("predictions").limit(500).get();
-        const filtered = allPreds.docs.filter((d) => {
-            const m = d.data().matchId;
-            return m === matchIdStr || m === matchId || String(m) === matchIdStr;
+    if (realHome === null || realAway === null) {
+        functions.logger.warn("reconcileFinishedMatchScores skipped: missing match score", {
+            matchId: matchIdStr,
+            homeScore: matchData.homeScore ?? null,
+            awayScore: matchData.awayScore ?? null,
         });
-        if (filtered.length > 0) {
-            preds = { docs: filtered, empty: false, size: filtered.length };
-        }
+        return { predictionsUpdated: 0, usersScoreAdjusted: 0, totalDeltaApplied: 0 };
     }
-    if (preds.empty) {
-        return 0;
-    }
-    const batch = db.batch();
-    let updated = 0;
-    for (const predDoc of preds.docs) {
+    const predictionDocs = await getPredictionsForMatch(db, matchIdStr);
+    if (predictionDocs.length === 0)
+        return { predictionsUpdated: 0, usersScoreAdjusted: 0, totalDeltaApplied: 0 };
+    let batch = db.batch();
+    let operationCount = 0;
+    let predictionsUpdated = 0;
+    let usersScoreAdjusted = 0;
+    let totalDeltaApplied = 0;
+    const commitBatchIfNeeded = async (force = false) => {
+        if (operationCount === 0)
+            return;
+        if (!force && operationCount < 400)
+            return;
+        await batch.commit();
+        batch = db.batch();
+        operationCount = 0;
+    };
+    for (const predDoc of predictionDocs) {
         const data = predDoc.data();
-        const nextPoints = computePoints(data.homeScore ?? 0, data.awayScore ?? 0, realHome, realAway);
+        const predHome = parseFiniteNumber(data.homeScore) ?? 0;
+        const predAway = parseFiniteNumber(data.awayScore) ?? 0;
+        const nextPoints = computePoints(predHome, predAway, realHome, realAway);
         const prevPointsRaw = data.points;
         const prevPoints = typeof prevPointsRaw === "number" && Number.isFinite(prevPointsRaw) ? prevPointsRaw : 0;
         const delta = nextPoints - prevPoints;
@@ -209,22 +286,29 @@ async function reconcileFinishedMatchScores(db, matchId, matchData) {
             continue;
         }
         batch.update(predDoc.ref, { points: nextPoints });
+        operationCount += 1;
+        predictionsUpdated += 1;
         const userId = data.userId;
         if (userId && delta !== 0) {
             const userRef = db.collection("users").doc(userId);
             batch.set(userRef, { currentScore: admin.firestore.FieldValue.increment(delta) }, { merge: true });
+            operationCount += 1;
+            usersScoreAdjusted += 1;
+            totalDeltaApplied += delta;
         }
-        updated++;
+        await commitBatchIfNeeded();
     }
-    if (updated > 0) {
-        await batch.commit();
+    await commitBatchIfNeeded(true);
+    if (predictionsUpdated > 0) {
         functions.logger.info("reconcileFinishedMatchScores committed", {
             matchId: matchIdStr,
-            updated,
+            predictionsUpdated,
+            usersScoreAdjusted,
+            totalDeltaApplied,
             realScore: `${realHome}-${realAway}`,
         });
     }
-    return updated;
+    return { predictionsUpdated, usersScoreAdjusted, totalDeltaApplied };
 }
 // --- Commandes de test (matchs fictifs) ---
 const TEST_MATCHES = [
@@ -363,9 +447,9 @@ exports.calculateScoresManual = functions.https.onRequest(async (req, res) => {
         const details = [];
         let totalUpdated = 0;
         for (const matchDoc of finished.docs) {
-            const n = await reconcileFinishedMatchScores(db, matchDoc.id, matchDoc.data());
-            totalUpdated += n;
-            details.push({ matchId: matchDoc.id, updated: n });
+            const result = await reconcileFinishedMatchScores(db, matchDoc.id, matchDoc.data());
+            totalUpdated += result.predictionsUpdated;
+            details.push({ matchId: matchDoc.id, updated: result.predictionsUpdated });
         }
         // Option recalculate: recalculer currentScore depuis la somme des points des pronostics
         const recalc = req.query?.recalculate === "1" || req.query?.recalculate === "true";
@@ -399,18 +483,84 @@ exports.reconcileFinishedMatchesDaily = functions.pubsub
     .schedule("0 0 * * *")
     .timeZone("Europe/Paris")
     .onRun(async () => {
+    const startedAt = Date.now();
+    if (!FOOTBALL_API_KEY) {
+        functions.logger.warn("reconcileFinishedMatchesDaily skipped: FOOTBALL_API_KEY missing");
+        return null;
+    }
     const db = admin.firestore();
-    const finished = await db
-        .collection("matches")
-        .where("status", "==", "FINISHED")
-        .get();
-    let totalUpdated = 0;
-    for (const matchDoc of finished.docs) {
-        totalUpdated += await reconcileFinishedMatchScores(db, matchDoc.id, matchDoc.data());
+    const finalStatuses = ["FINISHED"];
+    const counters = {
+        matchesChecked: 0,
+        matchesScoreChanged: 0,
+        matchesSkippedNoChange: 0,
+        matchesSkippedMissingOfficialScore: 0,
+        matchesApiErrors: 0,
+        predictionsUpdated: 0,
+        usersScoreAdjusted: 0,
+        totalDeltaApplied: 0,
+    };
+    for (const status of finalStatuses) {
+        const finished = await db.collection("matches").where("status", "==", status).get();
+        for (const matchDoc of finished.docs) {
+            counters.matchesChecked += 1;
+            const local = matchDoc.data();
+            const localHome = parseFiniteNumber(local.homeScore);
+            const localAway = parseFiniteNumber(local.awayScore);
+            const matchId = String(matchDoc.id);
+            try {
+                const official = await fetchOfficialMatchFromApi(matchId);
+                if (!hasOfficialScore(official)) {
+                    counters.matchesSkippedMissingOfficialScore += 1;
+                    functions.logger.warn("reconcileFinishedMatchesDaily skipped: missing official score", {
+                        matchId,
+                        apiStatus: official.status,
+                        apiHomeScore: official.home,
+                        apiAwayScore: official.away,
+                    });
+                    continue;
+                }
+                const scoreChanged = localHome !== official.home || localAway !== official.away;
+                if (!scoreChanged) {
+                    counters.matchesSkippedNoChange += 1;
+                    continue;
+                }
+                counters.matchesScoreChanged += 1;
+                await matchDoc.ref.set({
+                    homeScore: official.home,
+                    awayScore: official.away,
+                    status: official.status || local.status || "FINISHED",
+                }, { merge: true });
+                const result = await reconcileFinishedMatchScores(db, matchId, {
+                    ...local,
+                    homeScore: official.home,
+                    awayScore: official.away,
+                });
+                counters.predictionsUpdated += result.predictionsUpdated;
+                counters.usersScoreAdjusted += result.usersScoreAdjusted;
+                counters.totalDeltaApplied += result.totalDeltaApplied;
+            }
+            catch (error) {
+                const message = error instanceof Error ? error.message : String(error);
+                if (message.includes("API error 404")) {
+                    counters.matchesSkippedMissingOfficialScore += 1;
+                    functions.logger.warn("reconcileFinishedMatchesDaily skipped: official match not found", {
+                        matchId,
+                        error: message,
+                    });
+                    continue;
+                }
+                counters.matchesApiErrors += 1;
+                functions.logger.error("reconcileFinishedMatchesDaily API error", {
+                    matchId,
+                    error: message,
+                });
+            }
+        }
     }
     functions.logger.info("reconcileFinishedMatchesDaily done", {
-        matchesChecked: finished.size,
-        predictionsUpdated: totalUpdated,
+        ...counters,
+        runDurationMs: Date.now() - startedAt,
     });
     return null;
 });
