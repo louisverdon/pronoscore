@@ -36,6 +36,10 @@ jobs:
           echo "NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=${{ secrets.DEV_FIREBASE_MESSAGING_SENDER_ID }}" >> .env.local
           echo "NEXT_PUBLIC_FIREBASE_APP_ID=${{ secrets.DEV_FIREBASE_APP_ID }}" >> .env.local
 
+      - name: Create functions/.env from secrets
+        run: |
+          echo "FOOTBALL_API_KEY=${{ secrets.DEV_FOOTBALL_API_KEY }}" > functions/.env
+
       - name: Verify Firebase env file (values not logged)
         run: |
           set -euo pipefail
