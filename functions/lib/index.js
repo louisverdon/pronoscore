@@ -113,25 +113,39 @@ function hasOfficialScore(score) {
 function normalizePredictionMatchId(value) {
     return value === null || value === undefined ? "" : String(value);
 }
-async function fetchOfficialMatchFromApi(matchId) {
+function chunkArray(items, size) {
+    if (size <= 0)
+        return [items];
+    const chunks = [];
+    for (let i = 0; i < items.length; i += size) {
+        chunks.push(items.slice(i, i + size));
+    }
+    return chunks;
+}
+async function fetchOfficialMatchesByIdsFromApi(matchIds) {
+    const officialById = new Map();
+    if (matchIds.length === 0)
+        return officialById;
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 10_000);
     try {
-        // L'endpoint "match by id" est global (/v4/matches/{id}),
-        // pas scoppé à une compétition (/competitions/FL1/matches/{id}).
-        const res = await fetch(`${MATCH_BY_ID_URL}/${encodeURIComponent(matchId)}`, {
+        const query = new URLSearchParams({ ids: matchIds.join(",") }).toString();
+        const res = await fetch(`${MATCH_BY_ID_URL}?${query}`, {
             headers: { "X-Auth-Token": FOOTBALL_API_KEY },
             signal: controller.signal,
         });
         if (!res.ok) {
-            throw new Error(`API error ${res.status} for match ${matchId}`);
+            throw new Error(`API error ${res.status} for ids batch (${matchIds.length})`);
         }
         const payload = await res.json();
-        return {
-            status: payload.match?.status ?? "UNKNOWN",
-            home: payload.match?.score?.fullTime?.home ?? null,
-            away: payload.match?.score?.fullTime?.away ?? null,
-        };
+        for (const match of payload.matches ?? []) {
+            officialById.set(String(match.id), {
+                status: match.status ?? "UNKNOWN",
+                home: match.score?.fullTime?.home ?? null,
+                away: match.score?.fullTime?.away ?? null,
+            });
+        }
+        return officialById;
     }
     finally {
         clearTimeout(timeout);
@@ -489,7 +503,7 @@ exports.reconcileFinishedMatchesDaily = functions.pubsub
         return null;
     }
     const db = admin.firestore();
-    const finalStatuses = ["FINISHED"];
+    const maxRecentMatches = 100;
     const counters = {
         matchesChecked: 0,
         matchesScoreChanged: 0,
@@ -500,62 +514,76 @@ exports.reconcileFinishedMatchesDaily = functions.pubsub
         usersScoreAdjusted: 0,
         totalDeltaApplied: 0,
     };
-    for (const status of finalStatuses) {
-        const finished = await db.collection("matches").where("status", "==", status).get();
-        for (const matchDoc of finished.docs) {
-            counters.matchesChecked += 1;
+    const recent = await db
+        .collection("matches")
+        .orderBy("matchDate", "desc")
+        .limit(maxRecentMatches)
+        .get();
+    // On ne réconcilie que les matchs terminés, mais dans la fenêtre des 100 plus récents.
+    const finishedRecentDocs = recent.docs.filter((doc) => doc.data().status === "FINISHED");
+    counters.matchesChecked += finishedRecentDocs.length;
+    // Doc football-data v4: GET /v4/matches?ids=333,3303,3213
+    // Pour limiter les 429, on interroge l'API par lots d'ids.
+    const batches = chunkArray(finishedRecentDocs, 20);
+    for (const batch of batches) {
+        const batchIds = batch.map((doc) => String(doc.id));
+        let officialById;
+        try {
+            officialById = await fetchOfficialMatchesByIdsFromApi(batchIds);
+        }
+        catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            counters.matchesApiErrors += batchIds.length;
+            functions.logger.error("reconcileFinishedMatchesDaily API batch error", {
+                error: message,
+                batchSize: batchIds.length,
+                batchIdsSample: batchIds.slice(0, 5),
+            });
+            continue;
+        }
+        for (const matchDoc of batch) {
             const local = matchDoc.data();
             const localHome = parseFiniteNumber(local.homeScore);
             const localAway = parseFiniteNumber(local.awayScore);
             const matchId = String(matchDoc.id);
-            try {
-                const official = await fetchOfficialMatchFromApi(matchId);
-                if (!hasOfficialScore(official)) {
-                    counters.matchesSkippedMissingOfficialScore += 1;
-                    functions.logger.warn("reconcileFinishedMatchesDaily skipped: missing official score", {
-                        matchId,
-                        apiStatus: official.status,
-                        apiHomeScore: official.home,
-                        apiAwayScore: official.away,
-                    });
-                    continue;
-                }
-                const scoreChanged = localHome !== official.home || localAway !== official.away;
-                if (!scoreChanged) {
-                    counters.matchesSkippedNoChange += 1;
-                    continue;
-                }
-                counters.matchesScoreChanged += 1;
-                await matchDoc.ref.set({
-                    homeScore: official.home,
-                    awayScore: official.away,
-                    status: official.status || local.status || "FINISHED",
-                }, { merge: true });
-                const result = await reconcileFinishedMatchScores(db, matchId, {
-                    ...local,
-                    homeScore: official.home,
-                    awayScore: official.away,
-                });
-                counters.predictionsUpdated += result.predictionsUpdated;
-                counters.usersScoreAdjusted += result.usersScoreAdjusted;
-                counters.totalDeltaApplied += result.totalDeltaApplied;
-            }
-            catch (error) {
-                const message = error instanceof Error ? error.message : String(error);
-                if (message.includes("API error 404")) {
-                    counters.matchesSkippedMissingOfficialScore += 1;
-                    functions.logger.warn("reconcileFinishedMatchesDaily skipped: official match not found", {
-                        matchId,
-                        error: message,
-                    });
-                    continue;
-                }
-                counters.matchesApiErrors += 1;
-                functions.logger.error("reconcileFinishedMatchesDaily API error", {
+            const official = officialById.get(matchId);
+            if (!official) {
+                counters.matchesSkippedMissingOfficialScore += 1;
+                functions.logger.warn("reconcileFinishedMatchesDaily skipped: official match not found", {
                     matchId,
-                    error: message,
+                    reason: "not returned by /v4/matches?ids",
                 });
+                continue;
             }
+            if (!hasOfficialScore(official)) {
+                counters.matchesSkippedMissingOfficialScore += 1;
+                functions.logger.warn("reconcileFinishedMatchesDaily skipped: missing official score", {
+                    matchId,
+                    apiStatus: official.status,
+                    apiHomeScore: official.home,
+                    apiAwayScore: official.away,
+                });
+                continue;
+            }
+            const scoreChanged = localHome !== official.home || localAway !== official.away;
+            if (!scoreChanged) {
+                counters.matchesSkippedNoChange += 1;
+                continue;
+            }
+            counters.matchesScoreChanged += 1;
+            await matchDoc.ref.set({
+                homeScore: official.home,
+                awayScore: official.away,
+                status: official.status || local.status || "FINISHED",
+            }, { merge: true });
+            const result = await reconcileFinishedMatchScores(db, matchId, {
+                ...local,
+                homeScore: official.home,
+                awayScore: official.away,
+            });
+            counters.predictionsUpdated += result.predictionsUpdated;
+            counters.usersScoreAdjusted += result.usersScoreAdjusted;
+            counters.totalDeltaApplied += result.totalDeltaApplied;
         }
     }
     functions.logger.info("reconcileFinishedMatchesDaily done", {
