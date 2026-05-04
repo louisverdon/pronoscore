@@ -110,8 +110,9 @@ function formatDateUTC(date: Date): string {
   return date.toISOString().split("T")[0];
 }
 
-function getCurrentWeekRangeUTC(reference = new Date()): { dateFrom: string; dateTo: string } {
-  const day = reference.getUTCDay(); // 0 = dimanche, 1 = lundi, ..., 6 = samedi
+/** Lundi 00:00 UTC et dimanche 23:59:59.999 UTC de la semaine ISO contenant `reference` (lundi = début de semaine). */
+function getMondayAndSundayUTC(reference: Date): { monday: Date; sunday: Date } {
+  const day = reference.getUTCDay(); // 0 = dimanche, 1 = lundi, …
   const mondayOffset = day === 0 ? -6 : 1 - day;
 
   const monday = new Date(reference);
@@ -122,16 +123,33 @@ function getCurrentWeekRangeUTC(reference = new Date()): { dateFrom: string; dat
   sunday.setUTCDate(monday.getUTCDate() + 6);
   sunday.setUTCHours(23, 59, 59, 999);
 
-  return { dateFrom: formatDateUTC(monday), dateTo: formatDateUTC(sunday) };
+  return { monday, sunday };
 }
 
 /**
- * Synchronise les matchs de la semaine courante (lundi -> dimanche).
+ * Fenêtre API : semaine UTC en cours (lundi → dimanche) + semaine UTC précédente.
+ * Pas de matchs au-delà du dimanche de la semaine en cours.
+ */
+function getCurrentAndPreviousWeekRangeUTC(reference = new Date()): { dateFrom: string; dateTo: string } {
+  const { monday: currentMonday, sunday: currentSunday } = getMondayAndSundayUTC(reference);
+
+  const previousMonday = new Date(currentMonday);
+  previousMonday.setUTCDate(currentMonday.getUTCDate() - 7);
+  previousMonday.setUTCHours(0, 0, 0, 0);
+
+  return {
+    dateFrom: formatDateUTC(previousMonday),
+    dateTo: formatDateUTC(currentSunday),
+  };
+}
+
+/**
+ * Synchronise les matchs L1 sur la semaine UTC courante + la semaine UTC précédente.
  */
 async function fetchCurrentWeekMatches(db: admin.firestore.Firestore): Promise<number> {
-  const { dateFrom, dateTo } = getCurrentWeekRangeUTC();
+  const { dateFrom, dateTo } = getCurrentAndPreviousWeekRangeUTC();
   const url = `${FL1_MATCHES_URL}?${new URLSearchParams({ dateFrom, dateTo }).toString()}`;
-  console.log(`Récupération hebdomadaire : ${dateFrom} → ${dateTo}`);
+  console.log(`Récupération matchs (semaine courante + précédente, UTC) : ${dateFrom} → ${dateTo}`);
 
   const res = await fetch(url, { headers: { "X-Auth-Token": FOOTBALL_API_KEY } });
   if (!res.ok) throw new Error(`API error: ${res.status}`);

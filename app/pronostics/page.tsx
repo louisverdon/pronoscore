@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useAuth } from "@/lib/auth-context";
 import { getUserPredictions } from "@/lib/predictions";
 import RequireAuth from "@/components/RequireAuth";
-import { getMatch } from "@/lib/matches";
+import { getMatch, matchHasStarted, isMatchLiveForScoring } from "@/lib/matches";
 import { computePoints } from "@/lib/points";
 import { getLeagueVisibleUserIds } from "@/lib/leagues";
 import OtherUsersPredictionsModal from "@/components/OtherUsersPredictionsModal";
@@ -17,13 +17,6 @@ function getMatchdayKey(m: Match | null | undefined): number {
   if (m?.matchday != null && m.matchday > 0) return m.matchday;
   return 0;
 }
-
-const isMatchInProgress = (m: Match) =>
-  (m.status === "LIVE" || m.status === "IN_PLAY") &&
-  m.homeScore !== undefined &&
-  m.homeScore !== null &&
-  m.awayScore !== undefined &&
-  m.awayScore !== null;
 
 interface PredictionWithMatch extends Prediction {
   match?: Match | null;
@@ -162,7 +155,7 @@ function MesPronosticsPageContent() {
                                     +{p.points} pt{p.points > 1 ? "s" : ""}
                                   </span>
                                 )}
-                                {isMatchInProgress(p.match) && (() => {
+                                {isMatchLiveForScoring(p.match) && (() => {
                                   const pts = computePoints(p.homeScore, p.awayScore, p.match.homeScore ?? 0, p.match.awayScore ?? 0);
                                   return (
                                     <span className="rounded bg-orange-100 px-2 py-1 text-sm font-medium text-orange-700">
@@ -204,13 +197,12 @@ function MesPronosticsPageContent() {
                                   {p.match.awayScore ?? "-"}
                                 </div>
                               )}
-                              {isMatchInProgress(p.match) && (
+                              {isMatchLiveForScoring(p.match) && (
                                 <div className="mt-2 text-sm text-zinc-600">
                                   Score actuel : {p.match.homeScore} - {p.match.awayScore}
                                 </div>
                               )}
-                              {p.match.status !== "SCHEDULED" &&
-                                p.match.status !== "TIMED" &&
+                              {matchHasStarted(p.match) &&
                                 visibleUserIds.length > 0 && (
                                   <button
                                     type="button"

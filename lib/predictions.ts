@@ -50,10 +50,26 @@ export async function getUserPredictions(
 export async function getMatchPredictions(
   matchId: string
 ): Promise<Prediction[]> {
-  const q = query(
-    collection(db, PREDICTIONS_COLLECTION),
-    where("matchId", "==", matchId)
+  const byId = new Map<string, Prediction>();
+
+  const stringSnap = await getDocs(
+    query(collection(db, PREDICTIONS_COLLECTION), where("matchId", "==", matchId))
   );
-  const snap = await getDocs(q);
-  return snap.docs.map((d) => ({ id: d.id, ...d.data() } as Prediction));
+  for (const d of stringSnap.docs) {
+    byId.set(d.id, { id: d.id, ...d.data() } as Prediction);
+  }
+
+  if (/^\d+$/.test(matchId)) {
+    const numSnap = await getDocs(
+      query(
+        collection(db, PREDICTIONS_COLLECTION),
+        where("matchId", "==", Number(matchId))
+      )
+    );
+    for (const d of numSnap.docs) {
+      byId.set(d.id, { id: d.id, ...d.data() } as Prediction);
+    }
+  }
+
+  return Array.from(byId.values());
 }
