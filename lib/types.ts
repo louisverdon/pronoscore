@@ -3,6 +3,7 @@ export type MatchStatus =
   | "TIMED"
   | "LIVE"
   | "IN_PLAY"
+  | "PAUSED"
   | "FINISHED"
   | "CANCELLED";
 

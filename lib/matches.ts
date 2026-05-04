@@ -13,6 +13,32 @@ import type { Match } from "./types";
 
 const MATCHES_COLLECTION = "matches";
 
+/** Heure de coup d'envoi passée (utile si l'API / la sync laisse encore TIMED). */
+export function matchHasStarted(m: Pick<Match, "status" | "matchDate">): boolean {
+  if (m.status === "FINISHED" || m.status === "IN_PLAY" || m.status === "LIVE" || m.status === "PAUSED") {
+    return true;
+  }
+  const kickoff = new Date(m.matchDate).getTime();
+  if (!Number.isFinite(kickoff)) return false;
+  return kickoff <= Date.now();
+}
+
+/** Match en cours pour affichage des points "live" (score présent, pas terminé). */
+export function isMatchLiveForScoring(m: Match): boolean {
+  if (m.status === "FINISHED") return false;
+  if (
+    m.homeScore === undefined ||
+    m.homeScore === null ||
+    m.awayScore === undefined ||
+    m.awayScore === null
+  ) {
+    return false;
+  }
+  if (m.status === "IN_PLAY" || m.status === "LIVE" || m.status === "PAUSED") return true;
+  if ((m.status === "TIMED" || m.status === "SCHEDULED") && matchHasStarted(m)) return true;
+  return false;
+}
+
 export async function getAllMatches(): Promise<Match[]> {
   const q = query(
     collection(db, MATCHES_COLLECTION),
@@ -59,14 +85,7 @@ export async function getRecentMatches(): Promise<Match[]> {
 /** Matchs en cours (LIVE ou IN_PLAY) avec un score actuel */
 export async function getOngoingMatches(): Promise<Match[]> {
   const matches = await getAllMatches();
-  return matches.filter(
-    (m) =>
-      (m.status === "LIVE" || m.status === "IN_PLAY") &&
-      m.homeScore !== undefined &&
-      m.homeScore !== null &&
-      m.awayScore !== undefined &&
-      m.awayScore !== null
-  );
+  return matches.filter((m) => isMatchLiveForScoring(m));
 }
 
 export async function getMatch(matchId: string): Promise<Match | null> {

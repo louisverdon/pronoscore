@@ -6,6 +6,7 @@ import { computePoints } from "@/lib/points";
 import { getMatchPredictions } from "@/lib/predictions";
 import { getUser, getDisplayName } from "@/lib/user";
 import type { Match, Prediction, User } from "@/lib/types";
+import { isMatchLiveForScoring } from "@/lib/matches";
 
 interface UserPredictionEntry {
   user: User;
@@ -50,16 +51,12 @@ export default function OtherUsersPredictionsModal({
         let points = 0;
         if (match.status === "FINISHED" && pred.points !== undefined) {
           points = pred.points;
-        } else if (
-          (match.status === "LIVE" || match.status === "IN_PLAY") &&
-          match.homeScore !== undefined &&
-          match.awayScore !== undefined
-        ) {
+        } else if (isMatchLiveForScoring(match)) {
           points = computePoints(
             pred.homeScore,
             pred.awayScore,
-            match.homeScore,
-            match.awayScore
+            match.homeScore!,
+            match.awayScore!
           );
         }
 
@@ -95,7 +92,7 @@ export default function OtherUsersPredictionsModal({
                 Résultat&nbsp;: {match.homeScore} - {match.awayScore}
               </p>
             )}
-            {(match.status === "LIVE" || match.status === "IN_PLAY") && (
+            {isMatchLiveForScoring(match) && (
               <p className="text-xs text-orange-600">
                 En cours&nbsp;: {match.homeScore} - {match.awayScore}
               </p>
@@ -142,8 +139,7 @@ export default function OtherUsersPredictionsModal({
                   <span className="shrink-0 tabular-nums text-sm font-semibold text-zinc-700">
                     {prediction.homeScore}&nbsp;-&nbsp;{prediction.awayScore}
                   </span>
-                  {match.status !== "SCHEDULED" &&
-                    match.status !== "TIMED" && (
+                  {(match.status === "FINISHED" || isMatchLiveForScoring(match)) && (
                       <span
                         className={`shrink-0 rounded px-2 py-0.5 text-xs font-semibold ${pointsBadgeClass(points)}`}
                       >
